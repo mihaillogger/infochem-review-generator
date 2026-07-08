@@ -1,0 +1,21 @@
+# Среды и кэш
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Секреты (API ключи)
+.env
+
+# Данные (Volume)
+data/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# База данных
+module_2_parser_db/chroma_data/
+*.sqlite3
+*.db
