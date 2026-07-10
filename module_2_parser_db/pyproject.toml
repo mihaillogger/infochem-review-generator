@@ -3,13 +3,23 @@ name = "module-2-parser-db"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.139.0",
     "pydantic>=2.13.4",
+    "uvicorn>=0.51.0",
 ]
 
 [dependency-groups]
 dev = [
     "mypy>=2.2.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.21",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+exclude = ["tests", ".venv"]
+files = ["src/**/*.py"]
