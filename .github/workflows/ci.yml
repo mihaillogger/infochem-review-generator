@@ -1,0 +1,35 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "module_2_parser_db/.python-version"
+
+      - name: Sync dependencies for all modules
+        run: |
+          for module in module_1_downloader module_2_parser_db module_3_agents; do
+            cd $module && uv sync && cd ..
+          done
+
+      - name: Run Linters, Typechecks, and Tests
+        run: bash scripts/check.sh
