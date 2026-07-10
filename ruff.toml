@@ -9,3 +9,10 @@ select = [
     "UP"  # Обновление старого синтаксиса (pyupgrade)
 ]
 ignore = []
+
+exclude = [
+    ".venv",
+    ".git",
+    "__pycache__",
+    "tests",
+]
