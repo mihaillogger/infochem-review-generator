@@ -1,0 +1,18 @@
+services:
+  parser_db:
+    build:
+      context: ./module_2_parser_db
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Общая папка для PDF и картинок
+      - ./data:/data
+    # проброс GPU
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
