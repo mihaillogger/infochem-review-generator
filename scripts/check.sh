@@ -18,9 +18,10 @@ for MODULE in "${MODULES[@]}"; do
 
     echo "2) Запуск Mypy (Тайпчекинг)..."
     if [ -d "src" ]; then
-        uv run mypy src/
+        uv run mypy
     else
-        uv run mypy .
+        echo "ОШИБКА: Папка src/ не найдена в $MODULE! Весь исходный код должен быть внутри src/."
+        exit 1
     fi
 
     echo "3) Запуск Pytest с расчетом покрытия..."
