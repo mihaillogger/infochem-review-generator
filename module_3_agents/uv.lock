@@ -83,7 +83,7 @@ wheels = [
 ]
 
 [[package]]
-name = "module-2-parser-db"
+name = "module-3-agents"
 version = "0.1.0"
 source = { virtual = "." }
 
