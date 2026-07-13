@@ -9,20 +9,25 @@ class VisualMeta(BaseModel):
     caption: str | None = Field(default=None, description="Распознанная подпись к элементу")
 
 
+class Paragraph(BaseModel):
+    """Абзац."""
+
+    type: str = Field(..., description="Тип контента: 'text', 'table' или 'equation'")
+    content: str = Field(..., description="Сам текст, markdown или latex")
+
+
 class Section(BaseModel):
     """Логический раздел документа."""
 
     heading: str = Field(..., description="Заголовок раздела (например, '1. Introduction')")
     level: int = Field(..., description="Уровень вложенности заголовка (1 для H1, 2 для H2 и т.д.)")
-    paragraphs: list[str] = Field(
-        ..., description="Список сырых абзацев текста, принадлежащих разделу"
+    paragraphs: list[Paragraph] = Field(
+        ..., description="Список абзацев с типом контента, принадлежащих разделу"
     )
 
 
 class ParsedDocument(BaseModel):
-    """
-    Финальный выходной объект парсера.
-    """
+    """Финальный выходной объект парсера."""
 
     doi: str
     title: str = Field(..., description="Название научной статьи")
@@ -42,9 +47,7 @@ class DBChunkMetadata(BaseModel):
     section_path: str = Field(
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
-    linked_images: str = Field(
-        default="none", description="Строка с путями к картинкам через запятую"
-    )
+    linked_images: list[str] = Field(..., description="Список путей к картинкам")
 
 
 class DBChunk(BaseModel):
