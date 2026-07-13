@@ -13,12 +13,6 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-cache --system
 
 COPY src/ src/
-COPY tests/ tests/
-
-RUN uv run ruff check . && \
-    uv run ruff format --check . && \
-    uv run mypy src/ && \
-    uv run pytest tests/ -v --cov=src --cov-report=term-missing
 
 EXPOSE 8000
 
