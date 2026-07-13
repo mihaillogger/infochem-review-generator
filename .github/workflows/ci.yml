@@ -27,8 +27,10 @@ jobs:
 
       - name: Sync dependencies for all modules
         run: |
+          set -e
           for module in module_1_downloader module_2_parser_db module_3_agents; do
-            cd $module && uv sync && cd ..
+            echo "Syncing $module..."
+            (cd $module && uv sync)
           done
 
       - name: Run Linters, Typechecks, and Tests
