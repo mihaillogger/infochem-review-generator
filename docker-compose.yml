@@ -1,4 +1,5 @@
 services:
+  # Сервис с FastAPI и парсером
   parser_db:
     build:
       context: ./module_2_parser_db
@@ -6,8 +7,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Общая папка для PDF и картинок
+      # Общая папка только для сырых PDF и вырезанных картинок
       - ./data:/data
+    environment:
+      - CHROMA_HOST=chroma_db
+      - CHROMA_PORT=8000
+    depends_on:
+      - chroma_db
     # проброс GPU
 #    deploy:
 #      resources:
@@ -16,3 +22,15 @@ services:
 #            - driver: nvidia
 #              count: all
 #              capabilities: [gpu]
+
+  # Сервис с векторной базой данных
+  chroma_db:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      # Именованный том для хранения самих файлов базы
+      - chroma_data:/chroma/chroma
+
+volumes:
+  chroma_data:
