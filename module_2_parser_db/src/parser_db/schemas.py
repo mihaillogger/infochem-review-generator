@@ -46,19 +46,16 @@ class DBChunkMetadata(BaseModel):
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
     linked_images: list[str] = Field(..., description="Список путей к картинкам")
-    contains_table: bool = Field(
-        default=False, description="Флаг: есть ли в этом чанке таблица"
-    )
+    contains_table: bool = Field(default=False, description="Флаг: есть ли в этом чанке таблица")
     contains_math: bool = Field(
         default=False, description="Флаг: есть ли в этом чанке математика/формулы (LaTeX)"
     )
     raw_table_markup: str | None = Field(
-        default=None,
-        description="Оригинальный Markdown таблицы (если contains_table=True)"
+        default=None, description="Оригинальный Markdown таблицы (если contains_table=True)"
     )
     raw_math_markup: list[str] | None = Field(
         default=None,
-        description="Список оригинальных LaTeX формул в чанке (если contains_math=True)"
+        description="Список оригинальных LaTeX формул в чанке (если contains_math=True)",
     )
 
 
