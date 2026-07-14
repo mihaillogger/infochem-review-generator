@@ -13,18 +13,18 @@
 from __future__ import annotations
 
 import statistics
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 CROSSREF_URL = "https://api.crossref.org/works"
 
 # --- Параметры отбора (кандидаты в конфиг Модуля, задача T6) ---
-POOL = 60         # сколько кандидатов тянем, чтобы оценить шумовой пол
-BETA = 0.5        # порог = floor + BETA*(max-floor): «выше середины над шумом»
-MIN_N = 5         # не меньше — иначе тема почти пустая
-MAX_N = 40        # не больше — дальше почти наверняка шум
-TAIL = 20         # сколько статей с конца считаем шумовым полом
+POOL = 60  # сколько кандидатов тянем, чтобы оценить шумовой пол
+BETA = 0.5  # порог = floor + BETA*(max-floor): «выше середины над шумом»
+MIN_N = 5  # не меньше — иначе тема почти пустая
+MAX_N = 40  # не больше — дальше почти наверняка шум
+TAIL = 20  # сколько статей с конца считаем шумовым полом
 TIMEOUT = 20.0
 
 
@@ -42,16 +42,26 @@ def _build_filters(from_year: int, until_year: int) -> str:
 def _search_pool(
     client: httpx.Client, keyword: str, *, from_year: int, until_year: int
 ) -> list[dict[str, Any]]:
-    """Возвращает пул кандидатов (works) по одному ключевому слову."""
-    params = {
+    """Возвращает пул кандидатов (works), отсортированный по score убыванию.
+
+    Явный sort=score/order=desc — не полагаемся на дефолтный порядок API.
+    Плюс подстраховываемся локальной сортировкой: весь отбор ниже опирается
+    на то, что pool[0] — самый релевантный, а pool[:n] — топ.
+    """
+    params: dict[str, str | int] = {
         "query.bibliographic": keyword,
         "filter": _build_filters(from_year, until_year),
         "select": "DOI,title,author,issued,container-title,score",
+        "sort": "score",
+        "order": "desc",
         "rows": POOL,
     }
     resp = client.get(CROSSREF_URL, params=params, timeout=TIMEOUT)
     resp.raise_for_status()
-    return resp.json()["message"]["items"]
+    payload: dict[str, Any] = resp.json()
+    items = cast(list[dict[str, Any]], payload["message"]["items"])
+    items.sort(key=lambda w: w.get("score", 0.0), reverse=True)
+    return items
 
 
 def _adaptive_cutoff(scores: list[float]) -> int:
@@ -89,13 +99,14 @@ def _extract_year(work: dict[str, Any]) -> int | None:
 def _to_metadata(work: dict[str, Any], keyword: str) -> dict[str, Any]:
     """Одна работа CrossRef -> запись контракта metadata.json."""
     return {
-        "pdf_path": None,               # заполнит качалка (T4) после скачивания
+        "pdf_path": None,  # заполнит качалка (T4) после скачивания
         "title": (work.get("title") or [None])[0],
         "authors": _extract_authors(work),
         "year": _extract_year(work),
         "journal": (work.get("container-title") or [None])[0],
         "matched_keywords": [keyword],  # по каким темам статья найдена
-        "download_status": "pending",   # pending -> ok / not_found / error
+        "download_status": "pending",  # pending -> ok / not_found / error
+        "source": None,  # чем скачано (заполнит качалка)
     }
 
 
@@ -123,9 +134,7 @@ def search(
     manifest: dict[str, dict[str, Any]] = {}
     with httpx.Client(headers={"User-Agent": user_agent}) as client:
         for keyword in keywords:
-            pool = _search_pool(
-                client, keyword, from_year=from_year, until_year=until_year
-            )
+            pool = _search_pool(client, keyword, from_year=from_year, until_year=until_year)
             n = _adaptive_cutoff([w.get("score", 0.0) for w in pool])
             for work in pool[:n]:
                 doi = work.get("DOI")
