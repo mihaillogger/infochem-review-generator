@@ -39,21 +39,31 @@ class ParsedDocument(BaseModel):
 
 
 class DBChunkMetadata(BaseModel):
-    """
-    Метаданные чанка для сохранения в ChromaDB.
-    """
+    """Метаданные чанка для сохранения в ChromaDB."""
 
     doi: str
     section_path: str = Field(
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
     linked_images: list[str] = Field(..., description="Список путей к картинкам")
+    contains_table: bool = Field(
+        default=False, description="Флаг: есть ли в этом чанке таблица"
+    )
+    contains_math: bool = Field(
+        default=False, description="Флаг: есть ли в этом чанке математика/формулы (LaTeX)"
+    )
+    raw_table_markup: str | None = Field(
+        default=None,
+        description="Оригинальный Markdown таблицы (если contains_table=True)"
+    )
+    raw_math_markup: list[str] | None = Field(
+        default=None,
+        description="Список оригинальных LaTeX формул в чанке (если contains_math=True)"
+    )
 
 
 class DBChunk(BaseModel):
-    """
-    Объект чанка, готовый к загрузке в БД.
-    """
+    """Объект чанка, готовый к загрузке в БД."""
 
     chunk_id: str
     text: str = Field(..., description="Связный кусок текста (один или несколько абзацев)")
