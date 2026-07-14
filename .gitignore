@@ -19,3 +19,5 @@ data/
 module_2_parser_db/chroma_data/
 *.sqlite3
 *.db
+
+module_2_parser_db/src/parser_db/solution.ipynb
