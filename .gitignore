@@ -19,3 +19,7 @@ data/
 module_2_parser_db/chroma_data/
 *.sqlite3
 *.db
+
+# Личные рабочие заметки (не для общей репы)
+module_1_downloader/CHECKLIST_module1.md
+module_1_downloader/research/
