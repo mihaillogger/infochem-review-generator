@@ -45,7 +45,8 @@ class DBChunkMetadata(BaseModel):
     section_path: str = Field(
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
-    linked_images: list[str] = Field(..., description="Список путей к картинкам")
+    linked_images: str = Field(
+        default="[]", description="Список путей к картинкам")
     contains_table: bool = Field(default=False, description="Флаг: есть ли в этом чанке таблица")
     contains_math: bool = Field(
         default=False, description="Флаг: есть ли в этом чанке математика/формулы (LaTeX)"
