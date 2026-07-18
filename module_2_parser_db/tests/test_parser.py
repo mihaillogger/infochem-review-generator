@@ -1,7 +1,7 @@
-import pytest
-from src.parser_db.equations import validate_latex, fix_latex_brackets
+from src.parser_db.equations import fix_latex_brackets, validate_latex
 from src.parser_db.extractor import build_parsed_document
 from src.parser_db.schemas import ParsedDocument
+
 
 def test_validate_latex_balanced():
     """Проверяем, что правильные формулы проходят валидацию."""

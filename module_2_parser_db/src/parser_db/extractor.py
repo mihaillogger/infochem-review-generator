@@ -3,9 +3,11 @@
 их в строгие Pydantic-схемы (ParsedDocument).
 """
 
-from typing import List, Dict, Any
-from src.parser_db.schemas import ParsedDocument, Section, Paragraph, VisualMeta
-from src.parser_db.equations import validate_latex, fix_latex_brackets
+from typing import Any
+
+from src.parser_db.equations import fix_latex_brackets, validate_latex
+from src.parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
+
 
 def flatten_markdown_table(md_table: str) -> str:
     """
@@ -47,7 +49,11 @@ def flatten_markdown_table(md_table: str) -> str:
     return result_text
 
 
-def build_parsed_document(mineru_data: List[Dict[str, Any]], doi: str, title: str) -> ParsedDocument:
+def build_parsed_document(
+        mineru_data: list[dict[str, Any]], 
+        doi: str, 
+        title: str
+        ) -> ParsedDocument:
     """
     Собирает объект ParsedDocument из сырого JSON, полученного от MinerU.
 
@@ -62,11 +68,11 @@ def build_parsed_document(mineru_data: List[Dict[str, Any]], doi: str, title: st
     Returns:
         ParsedDocument: Валидированный Pydantic-объект всей статьи.
     """
-    sections: List[Section] = []
-    visuals: List[VisualMeta] = []
+    sections: list[Section] = []
+    visuals: list[VisualMeta] = []
     
     current_heading = "Metadata / Abstract"
-    current_paragraphs: List[Paragraph] = []
+    current_paragraphs: list[Paragraph] = []
     
     for block in mineru_data:
         block_type = block.get('type')
@@ -116,12 +122,15 @@ def build_parsed_document(mineru_data: List[Dict[str, Any]], doi: str, title: st
                 current_paragraphs.append(Paragraph(type="table", content=flat_text))
             else:
                 # Заглушка для обычной картинки, чтобы не терять контекст в тексте
-                current_paragraphs.append(Paragraph(type="text", content=f"[{visual_id}: {caption}]"))
+                current_paragraphs.append(
+                    Paragraph(type="text", content=f"[{visual_id}: {caption}]"))
             continue
             
         # 4. Обычный текст
         if block_type == 'text' and content:
-            current_paragraphs.append(Paragraph(type="text", content=content))
+            current_paragraphs.append(
+                Paragraph(type="text", content=content)
+                )
 
     # Сохраняем последний накопленный раздел после выхода из цикла
     if current_paragraphs:
