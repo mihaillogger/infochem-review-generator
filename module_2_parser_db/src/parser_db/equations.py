@@ -2,6 +2,7 @@
 Модуль для валидации и лечения математических формул (LaTeX).
 """
 
+
 def validate_latex(latex_str: str) -> bool:
     """
     Проверяет баланс скобок в LaTeX-формуле.
@@ -13,9 +14,9 @@ def validate_latex(latex_str: str) -> bool:
         bool: True, если синтаксис (скобки) сбалансирован, иначе False.
     """
     stack = []
-    brackets = {'{': '}', '[': ']', '(': ')'}
+    brackets = {"{": "}", "[": "]", "(": ")"}
     inverse_brackets = {v: k for k, v in brackets.items()}
-    
+
     for char in latex_str:
         if char in brackets:
             stack.append(char)
@@ -25,7 +26,7 @@ def validate_latex(latex_str: str) -> bool:
             top = stack.pop()
             if top != inverse_brackets[char]:
                 return False  # Несовпадение типов скобок
-                
+
     return len(stack) == 0
 
 
@@ -41,8 +42,8 @@ def fix_latex_brackets(latex_str: str) -> str:
         str: Исправленная строка.
     """
     stack = []
-    brackets = {'{': '}', '[': ']', '(': ')'}
-    
+    brackets = {"{": "}", "[": "]", "(": ")"}
+
     # Собираем все незакрытые скобки
     for char in latex_str:
         if char in brackets:
@@ -50,11 +51,11 @@ def fix_latex_brackets(latex_str: str) -> str:
         elif char in brackets.values():
             if stack:
                 stack.pop()
-                
+
     # Дописываем недостающие скобки в конец
     fixed_str = latex_str
     while stack:
         unclosed = stack.pop()
         fixed_str += brackets[unclosed]
-        
+
     return fixed_str
