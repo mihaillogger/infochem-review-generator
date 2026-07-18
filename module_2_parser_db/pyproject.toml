@@ -19,7 +19,14 @@ dev = [
 ]
 
 [tool.mypy]
+mypy_path = "src"
+explicit_package_bases = true
 python_version = "3.11"
 strict = true
 exclude = [".venv"]
 files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]
