@@ -15,9 +15,18 @@ data/
 *.jpg
 *.jpeg
 
+# Выхлоп прогонов загрузчика: сами PDF и manifest/metadata с путями к ним
+module_1_downloader/test*/
+module_1_downloader/downloads/
+module_1_downloader/manifest.json
+
 # База данных
 module_2_parser_db/chroma_data/
 *.sqlite3
 *.db
 
+# Личные рабочие заметки (не для общей репы)
+module_1_downloader/CHECKLIST_module1.md
+module_1_downloader/research/
 module_2_parser_db/src/parser_db/solution.ipynb
+.coverage
