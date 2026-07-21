@@ -15,8 +15,9 @@ data/
 *.jpg
 *.jpeg
 
-# Выхлоп прогонов загрузчика: сами PDF и manifest/metadata с путями к ним
-module_1_downloader/test*/
+# Выхлоп прогонов загрузчика: сами PDF и manifest/metadata с путями к ним.
+# Именно test_* с подчёркиванием — не задеть папку с тестами tests/.
+module_1_downloader/test_*/
 module_1_downloader/downloads/
 module_1_downloader/manifest.json
 

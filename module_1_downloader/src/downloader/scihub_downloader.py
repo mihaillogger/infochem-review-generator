@@ -47,13 +47,12 @@ DOWNLOAD_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Порядок = приоритет. .ru проверен рабочим на живом прогоне; .cat взят из
-# редиректа самого Sci-Hub, но как вход по DOI пока НЕ подтверждён.
-# Ранее тут были .se и .st — оба мертвы (NAME_NOT_RESOLVED и TIMED_OUT).
-SCIHUB_MIRRORS = (
-    "https://sci-hub.ru",
-    "https://sci-hub.cat",
-)
+# Только проверенные на живых прогонах домены. Кандидаты, которые сюда НЕ
+# годятся: .se и .st мертвы (NAME_NOT_RESOLVED и TIMED_OUT), .cat встречается
+# в адресах файлов, но как вход по DOI не работает — статьи не отдаёт ни разу,
+# только съедает время на каждой неудаче.
+# Новый домен добавлять сюда лишь после того, как с него реально скачался PDF.
+SCIHUB_MIRRORS = ("https://sci-hub.ru",)
 MIRROR_TIMEOUT_MS = 15000  # мёртвый домен не должен вешать прогон надолго
 ALTCHA_WAIT_MS = 8000  # ждём, пока JS дорисует виджет проверки на робота
 PDF_WAIT_SECONDS = 20  # сколько ждём, пока PDF пролетит по сети
@@ -345,17 +344,26 @@ def download_file(pdf_url: str, save_path: Path) -> bool:
         return False
 
 
-def _browser_download(context: BrowserContext, url: str, save_path: Path) -> bool:
+def _browser_download(
+    context: BrowserContext,
+    url: str,
+    save_path: Path,
+    downloads: list[Download] | None = None,
+) -> bool:
     """Забирает PDF через браузер, когда обычный HTTP-клиент словил 403.
 
     Издатели (MDPI, PMC, DOAJ) отшивают requests, но пускают настоящий браузер.
     Файл берём двумя путями: либо Chromium сам инициирует скачивание, либо PDF
     просто пролетает по сети — тогда читаем тело ответа. Через requests повторно
     не ходим: ссылка на файл нередко одноразовая и завязана на сессию.
+
+    `downloads` — общий список на всю цепочку переходов: загрузку может начать
+    и та страница, с которой мы уже ушли на лендинг, и терять её нельзя.
     """
     page = context.new_page()
     pdf_bodies: list[bytes] = []
-    downloads: list[Download] = []
+    if downloads is None:
+        downloads = []
 
     def handle_response(response: Response) -> None:
         try:
@@ -393,7 +401,14 @@ def _browser_download(context: BrowserContext, url: str, save_path: Path) -> boo
         link = _find_pdf_link(page.content().encode(), page.url)
         if link and link != url:
             print(f"[*] Лендинг в браузере, идём за PDF: {link}")
-            return _browser_download(context, link, save_path)
+            if _browser_download(context, link, save_path, downloads):
+                return True
+
+        # Загрузка могла начаться с запозданием — пока мы ходили на лендинг
+        # или уже под самый конец ожидания. Проверяем перед тем, как сдаться.
+        if downloads:
+            downloads[0].save_as(save_path)
+            return save_path.exists() and save_path.stat().st_size > 0
 
         return False
     except Exception as e:
@@ -461,14 +476,17 @@ def fetch_article(
         # HTTP-клиента издатели часто отшивают по 403, а браузер пускают —
         # ссылки-то рабочие, проверено руками. Поэтому прежде чем идти на
         # Sci-Hub, пробуем те же самые OA-ссылки, но через Playwright.
-        # Тут headless=True жёстко, независимо от аргумента: OA-источники
-        # его пропускают (проверено на MDPI/CERN), а окно ради них открывать
-        # незачем — видимый браузер нужен только Sci-Hub.
+        # Сначала headless: быстро и без окон, так берётся большинство копий.
+        # Но часть издателей его распознаёт — MDPI отдал файл только с видимым
+        # окном, ровно как Sci-Hub. Поэтому упрямых добиваем вторым заходом.
         print("[!] HTTP-клиент не справился. Пробуем те же ссылки браузером...")
         used = download_via_browser(candidates, save_path, headless=True)
+        if not used:
+            print("[!] Headless не прошёл. Повторяем с видимым окном...")
+            used = download_via_browser(candidates, save_path, headless=False)
         if used:
             print(f"[+] Сохранено: {save_path}")
-            return FetchResult(ok=True, pdf_path=str(save_path), source="unpaywall")
+            return FetchResult(ok=True, pdf_path=str(save_path), source="oa")
         print("[!] Браузер тоже не забрал OA-копию.")
     else:
         print("[!] Открытых копий не знает ни одна база.")
