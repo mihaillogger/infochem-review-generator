@@ -104,4 +104,4 @@ def test_build_parsed_document_structure() -> None:
 
     # Проверка точного извлечения Visual ID
     assert len(doc.visuals) == 1
-    assert doc.visuals[0].id == "Figure 1."
+    assert doc.visuals[0].id == "Figure 1"
