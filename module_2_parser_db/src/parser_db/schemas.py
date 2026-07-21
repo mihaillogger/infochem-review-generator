@@ -16,9 +16,7 @@ class Paragraph(BaseModel):
 
     type: str = Field(..., description="Тип контента: 'text', 'table' или 'equation'")
     content: str = Field(..., description="Сам текст, markdown или latex")
-    is_broken: bool = Field(
-        default=False, description="Флаг кривого парсинга для VLM-агента"
-    )
+    is_broken: bool = Field(default=False, description="Флаг кривого парсинга для VLM-агента")
     image_fallback_path: str | None = Field(
         default=None, description="Путь к картинке для восстановления VLM-агентом"
     )
@@ -39,9 +37,7 @@ class ParsedDocument(BaseModel):
     title: str = Field(..., description="Название научной статьи")
     authors: list[str] = Field(default_factory=list)
     sections: list[Section] = Field(..., description="Иерархическая структура текста")
-    visuals: list[VisualMeta] = Field(
-        default_factory=list, description="Все графические элементы"
-    )
+    visuals: list[VisualMeta] = Field(default_factory=list, description="Все графические элементы")
 
 
 class DBChunkMetadata(BaseModel):
@@ -51,12 +47,8 @@ class DBChunkMetadata(BaseModel):
     section_path: str = Field(
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
-    linked_images: list[str] = Field(
-        default_factory=list, description="Список путей к картинкам"
-    )
-    contains_table: bool = Field(
-        default=False, description="Флаг: есть ли в этом чанке таблица"
-    )
+    linked_images: list[str] = Field(default_factory=list, description="Список путей к картинкам")
+    contains_table: bool = Field(default=False, description="Флаг: есть ли в этом чанке таблица")
     contains_math: bool = Field(
         default=False, description="Флаг: есть ли в этом чанке математика/формулы (LaTeX)"
     )

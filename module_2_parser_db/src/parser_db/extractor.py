@@ -186,9 +186,7 @@ def build_parsed_document(
             else:
                 fixed_content = fix_latex_brackets(content)
                 if validate_latex(fixed_content):
-                    current_paragraphs.append(
-                        Paragraph(type="equation", content=fixed_content)
-                    )
+                    current_paragraphs.append(Paragraph(type="equation", content=fixed_content))
                 else:
                     current_paragraphs.append(
                         Paragraph(
@@ -232,9 +230,7 @@ def build_parsed_document(
                 else:
                     table_md = optimize_table_markup(table_html)
                     table_content = f"Caption: {caption}\n\n{table_md}"
-                    current_paragraphs.append(
-                        Paragraph(type="table", content=table_content)
-                    )
+                    current_paragraphs.append(Paragraph(type="table", content=table_content))
             else:
                 current_paragraphs.append(
                     Paragraph(type="text", content=f"[{exact_id}: {caption}]")
