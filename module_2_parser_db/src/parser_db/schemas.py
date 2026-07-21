@@ -39,13 +39,13 @@ class ParsedDocument(BaseModel):
 
 
 class DBChunkMetadata(BaseModel):
-    """Метаданные чанка для сохранения в ChromaDB."""
+    """Метаданные чанка для сохранения в БД."""
 
     doi: str
     section_path: str = Field(
         ..., description="Путь заголовков, например 'Introduction > Background'"
     )
-    linked_images: str = Field(default="[]", description="Список путей к картинкам")
+    linked_images: list[str] = Field(default_factory=list, description="Список путей к картинкам")
     contains_table: bool = Field(default=False, description="Флаг: есть ли в этом чанке таблица")
     contains_math: bool = Field(
         default=False, description="Флаг: есть ли в этом чанке математика/формулы (LaTeX)"
