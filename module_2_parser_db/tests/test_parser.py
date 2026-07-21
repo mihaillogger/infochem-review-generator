@@ -53,7 +53,9 @@ def test_extract_exact_visual_id() -> None:
 def test_table_optimization_and_validation() -> None:
     """Проверяет логику сжатия и валидации HTML-таблиц."""
     clean_flat_html = "<table><tr><td>A</td><td>B</td></tr></table>"
-    clean_complex_html = '<table><tr><th colspan="2">A</th></tr><tr><td>B</td><td>C</td></tr></table>'
+    clean_complex_html = (
+        '<table><tr><th colspan="2">A</th></tr><tr><td>B</td><td>C</td></tr></table>'
+    )
     broken_html = "<table><tr><td>" + "1" * 40 + "</td></tr></table>"
 
     assert is_table_broken(broken_html) is True
@@ -71,12 +73,16 @@ def test_build_parsed_document_structure() -> None:
         {"type": "text", "layout_type": "heading", "text_level": 1, "text": "1. Introduction"},
         {"type": "text", "text": "This is a test paragraph."},
         {"type": "equation", "text": "\\frac{1}{2"},  # Будет вылечено
-        {"type": "equation", "text": "\\begin{matrix} 1", "img_path": "/img/1.png"},  # Битое (is_broken)
+        {
+            "type": "equation",
+            "text": "\\begin{matrix} 1",
+            "img_path": "/img/1.png",
+        },  # Битое (is_broken)
         {
             "type": "image",
             "id": "Vis_99",
             "img_path": "/test/path.png",
-            "image_caption": ["Figure 1. Test Image"]
+            "image_caption": ["Figure 1. Test Image"],
         },
     ]
 
@@ -87,10 +93,10 @@ def test_build_parsed_document_structure() -> None:
     assert len(doc.sections) == 1
     assert doc.sections[0].heading == "Introduction"
     assert doc.sections[0].level == 1
-    
+
     # Должно быть 4 абзаца: текст, формула (вылеченная), формула (битая), текст-заглушка картинки
     assert len(doc.sections[0].paragraphs) == 4
-    
+
     # Проверка флагов уравнений
     assert doc.sections[0].paragraphs[1].is_broken is False
     assert doc.sections[0].paragraphs[2].is_broken is True
