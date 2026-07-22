@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.139.0",
     "fastembed>=0.8.0",
     "numpy>=2.4.6",
+    "markdownify>=1.2.3",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
     "qdrant-client>=1.18.0",
