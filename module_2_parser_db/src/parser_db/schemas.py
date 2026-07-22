@@ -59,6 +59,18 @@ class DBChunkMetadata(BaseModel):
         default=None,
         description="Список оригинальных LaTeX формул в чанке (если contains_math=True)",
     )
+    has_broken_table: bool = Field(default=False, description="Флаг: есть ли в чанке битая таблица")
+    has_broken_math: bool = Field(default=False, description="Флаг: есть ли в чанке битая формула")
+    fallback_table_paths: list[str] = Field(
+        default_factory=list,
+        description="Пути к картинкам битых таблиц для восстановления VLM-агеном "
+        "(если has_broken_table=True)",
+    )
+    fallback_math_paths: list[str] = Field(
+        default_factory=list,
+        description="Пути к картинкам битых формул для восстановления VLM-агентов "
+        "(если has_broken_math=True)",
+    )
 
 
 class DBChunk(BaseModel):

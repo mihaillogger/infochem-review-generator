@@ -70,6 +70,12 @@ class QdrantStore:
             self.client.create_payload_index(
                 self.collection_name, "contains_math", models.PayloadSchemaType.BOOL
             )
+            self.client.create_payload_index(
+                self.collection_name, "has_broken_table", models.PayloadSchemaType.BOOL
+            )
+            self.client.create_payload_index(
+                self.collection_name, "has_broken_math", models.PayloadSchemaType.BOOL
+            )
 
             # Текстовый индекс для разделов
             self.client.create_payload_index(
@@ -203,6 +209,10 @@ class QdrantStore:
                     "raw_table_markup": payload.get("raw_table_markup"),
                     "raw_math_markup": payload.get("raw_math_markup"),
                     "linked_images": payload.get("linked_images"),
+                    "has_broken_table": payload.get("has_broken_table", False),
+                    "has_broken_math": payload.get("has_broken_math", False),
+                    "fallback_table_paths": payload.get("fallback_table_paths", []),
+                    "fallback_math_paths": payload.get("fallback_math_paths", []),
                 }
             )
 

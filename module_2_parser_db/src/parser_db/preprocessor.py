@@ -94,6 +94,14 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
                 "contains_math": para.type == "equation",
                 "raw_table_markup": para.content if para.type == "table" else None,
                 "raw_math_markup": [para.content] if para.type == "equation" else None,
+                "is_broken_table": para.is_broken and para.type == "table",
+                "is_broken_math": para.is_broken and para.type == "equation",
+                "fallback_table_path": para.image_fallback_path
+                if (para.is_broken and para.type == "table")
+                else None,
+                "fallback_math_path": para.image_fallback_path
+                if (para.is_broken and para.type == "equation")
+                else None,
             }
 
             # Добавляем предыдущий абзац
@@ -117,6 +125,10 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
                     "contains_math": False,
                     "raw_table_markup": None,
                     "raw_math_markup": None,
+                    "is_broken_table": False,
+                    "is_broken_math": False,
+                    "fallback_table_path": None,
+                    "fallback_math_path": None,
                 }
             )
 

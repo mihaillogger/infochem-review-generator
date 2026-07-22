@@ -24,6 +24,10 @@ class ChunkMeta(TypedDict):
     contains_math: bool
     raw_table_markup: str | None
     raw_math_markup: list[str]
+    has_broken_table: bool
+    has_broken_math: bool
+    fallback_table_paths: list[str]
+    fallback_math_paths: list[str]
 
 
 def _cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -70,6 +74,10 @@ def _save_chunk(
         contains_math=meta.get("contains_math", False),
         raw_table_markup=meta.get("raw_table_markup"),
         raw_math_markup=meta.get("raw_math_markup") if meta.get("raw_math_markup") else None,
+        has_broken_table=meta.get("has_broken_table", False),
+        has_broken_math=meta.get("has_broken_math", False),
+        fallback_table_paths=meta.get("fallback_table_paths", []),
+        fallback_math_paths=meta.get("fallback_math_paths", []),
     )
 
     chunks_list.append(
@@ -137,6 +145,10 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
             "contains_math": False,
             "raw_table_markup": None,
             "raw_math_markup": [],
+            "has_broken_table": False,
+            "has_broken_math": False,
+            "fallback_table_paths": [],
+            "fallback_math_paths": [],
         }
         linked_images: set[str] = set()
 
@@ -165,6 +177,10 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                     "contains_math": False,
                     "raw_table_markup": None,
                     "raw_math_markup": [],
+                    "has_broken_table": False,
+                    "has_broken_math": False,
+                    "fallback_table_paths": [],
+                    "fallback_math_paths": [],
                 }
                 linked_images = set()
 
@@ -181,6 +197,16 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
             if block.get("contains_math") and isinstance(math_markup, list):
                 current_meta["contains_math"] = True
                 current_meta["raw_math_markup"].extend(math_markup)
+
+            if block.get("is_broken_table"):
+                current_meta["has_broken_table"] = True
+                if block.get("fallback_table_path"):
+                    current_meta["fallback_table_paths"].append(block["fallback_table_path"])
+
+            if block.get("is_broken_math"):
+                current_meta["has_broken_math"] = True
+                if block.get("fallback_math_path"):
+                    current_meta["fallback_math_paths"].append(block["fallback_math_path"])
 
             linked_images.update(extract_validated_visuals(block["text"], document.visuals))
 
@@ -201,6 +227,10 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                     "contains_math": False,
                     "raw_table_markup": None,
                     "raw_math_markup": [],
+                    "has_broken_table": False,
+                    "has_broken_math": False,
+                    "fallback_table_paths": [],
+                    "fallback_math_paths": [],
                 }
                 linked_images = set()
 
