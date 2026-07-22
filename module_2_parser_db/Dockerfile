@@ -10,10 +10,11 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-cache --system
+RUN uv sync --frozen --no-cache
 
 COPY src/ src/
 
+ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app/src
 
 EXPOSE 8000
