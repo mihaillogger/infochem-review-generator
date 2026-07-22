@@ -3,8 +3,9 @@
 Реализует REST-интерфейс для поиска по базе знаний и асинхронного парсинга PDF.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -18,7 +19,7 @@ from parser_db.worker import parse_pdf_task
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Управляет жизненным циклом приложения FastAPI.
 
     Открывает соединение брокера TaskIQ с Redis при старте сервера
@@ -46,7 +47,7 @@ store = QdrantStore()
 # --- Строгие контракты (Enum) ---
 
 
-class StandardSection(str, Enum):
+class StandardSection(StrEnum):
     """Стандартизированные разделы научных статей для фильтрации."""
 
     ABSTRACT = "Abstract"
@@ -108,7 +109,7 @@ async def validation_exception_handler(
 
     llm_instructions = "Твой JSON-запрос не прошел валидацию. "
     for err in errors:
-        loc = " -> ".join(str(l) for l in err["loc"])
+        loc = " -> ".join(str(part) for part in err["loc"])
         msg = err["msg"]
         llm_instructions += f"Ошибка в поле '{loc}': {msg}. "
 
@@ -133,7 +134,7 @@ async def validation_exception_handler(
 
 
 @app.post("/api/v1/search", summary="Гибридный поиск по базе знаний")
-async def search_documents(request: SearchRequest) -> dict[str, Any]:
+async def search_documents(request: SearchRequest, http_request: Request) -> Any:
     """Точка входа для агентов. Выполняет поиск Dense+Sparse с алгоритмом RRF."""
     try:
         section_val = request.section_filter.value if request.section_filter else None
@@ -156,7 +157,7 @@ async def search_documents(request: SearchRequest) -> dict[str, Any]:
                 "status": 500,
                 "detail": f"Внутренняя ошибка векторной БД: {str(e)}. "
                 f"Попробуй изменить параметры запроса.",
-                "instance": str(request.url),
+                "instance": str(http_request.url),
             },
         )
 

@@ -1,3 +1,4 @@
+import numpy as np
 import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
 
@@ -6,8 +7,9 @@ from parser_db.config import settings
 
 class NomicEmbedder:
     _instance = None
+    model: SentenceTransformer
 
-    def __new__(cls):
+    def __new__(cls) -> "NomicEmbedder":
         # Паттерн Синглтон, чтобы модель грузилась в память только один раз
         # при старте воркера TaskIQ, а не при каждом запросе
         if cls._instance is None:
@@ -20,7 +22,7 @@ class NomicEmbedder:
             )
         return cls._instance
 
-    def encode(self, text: str, is_document: bool = True) -> list[float]:
+    def encode(self, text: str, is_document: bool = True) -> np.ndarray:
         """
         Векторизует текст.
         Nomic требует строгие префиксы для разделения документов и запросов.

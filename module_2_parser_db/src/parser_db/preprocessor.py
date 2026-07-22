@@ -1,6 +1,7 @@
 """Модуль предобработки распарсенного текста перед чанкингом."""
 
 import re
+from typing import Any
 
 from transformers import AutoTokenizer
 
@@ -64,10 +65,10 @@ def split_recursively(text: str, max_tokens: int) -> list[str]:
     # Если даже по пробелам не бьется, режем по токенам
     tokens = tokenizer.encode(text)
     chunks = [tokens[i : i + max_tokens] for i in range(0, len(tokens), max_tokens)]
-    return [tokenizer.decode(chunk) for chunk in chunks]
+    return [str(tokenizer.decode(chunk)) for chunk in chunks]
 
 
-def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict]:
+def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
     """
     Группирует параграфы методом 'Сэндвича', склеивая таблицы и формулы
     с соседними текстовыми блоками.
@@ -78,7 +79,7 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict]:
     Returns:
         list[dict]: Список сформированных блоков с предварительной разметкой.
     """
-    blocks = []
+    blocks: list[dict[str, Any]] = []
     skip_next = False
 
     for i, para in enumerate(paragraphs):
@@ -97,7 +98,7 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict]:
 
             # Добавляем предыдущий абзац
             if i > 0 and paragraphs[i - 1].type == "text" and not blocks[-1].get("is_sandwich"):
-                sandwich_text.append(blocks.pop()["text"])
+                sandwich_text.append(str(blocks.pop()["text"]))
 
             sandwich_text.append(para.content)
 

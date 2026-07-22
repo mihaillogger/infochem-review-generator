@@ -1,6 +1,7 @@
 """Модуль семантического чанкинга на основе подготовленных блоков текста."""
 
 import uuid
+from typing import Any, TypedDict
 
 import numpy as np
 
@@ -16,6 +17,13 @@ from parser_db.schemas import DBChunk, DBChunkMetadata, ParsedDocument
 
 # Инициализируем модель
 embedder = NomicEmbedder()
+
+
+class ChunkMeta(TypedDict):
+    contains_table: bool
+    contains_math: bool
+    raw_table_markup: str | None
+    raw_math_markup: list[str]
 
 
 def _cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
@@ -39,8 +47,8 @@ def _save_chunk(
     doi: str,
     section_heading: str,
     chunk_text: list[str],
-    meta: dict,
-    images: set,
+    meta: ChunkMeta,
+    images: set[str],
     chunks_list: list[DBChunk],
 ) -> None:
     """
@@ -79,7 +87,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
     Returns:
         list[DBChunk]: Готовые чанки для загрузки в БД.
     """
-    chunks = []
+    chunks: list[DBChunk] = []
 
     for section in document.sections:
         raw_blocks = build_sandwiches(section.paragraphs)
@@ -87,7 +95,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
             continue
 
         # 1. Разбиваем огромные блоки рекурсивным сплиттером
-        blocks = []
+        blocks: list[dict[str, Any]] = []
         for block in raw_blocks:
             if count_tokens(block["text"]) > settings.CHUNK_LIMIT and not block.get("is_sandwich"):
                 split_texts = split_recursively(block["text"], settings.CHUNK_LIMIT)
@@ -122,15 +130,15 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                         ema = similarities[i + 1]
 
         # 4. Собираем чанки с жестким контролем токенов
-        current_chunk_text = []
+        current_chunk_text: list[str] = []
         current_tokens = 0
-        current_meta = {
+        current_meta: ChunkMeta = {
             "contains_table": False,
             "contains_math": False,
             "raw_table_markup": None,
             "raw_math_markup": [],
         }
-        linked_images = set()
+        linked_images: set[str] = set()
 
         for i, block in enumerate(blocks):
             block_tokens = count_tokens(block["text"])
@@ -169,9 +177,10 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                 current_meta["contains_table"] = True
                 current_meta["raw_table_markup"] = block.get("raw_table_markup")
 
-            if block.get("contains_math") and block.get("raw_math_markup"):
+            math_markup = block.get("raw_math_markup")
+            if block.get("contains_math") and isinstance(math_markup, list):
                 current_meta["contains_math"] = True
-                current_meta["raw_math_markup"].extend(block.get("raw_math_markup"))
+                current_meta["raw_math_markup"].extend(math_markup)
 
             linked_images.update(extract_validated_visuals(block["text"], document.visuals))
 

@@ -100,7 +100,7 @@ class QdrantStore:
         sparse_embeddings = list(self.sparse_embedder.embed(texts))
 
         for idx, chunk in enumerate(chunks):
-            dense_vector = self.dense_embedder.encode(chunk.text, is_document=True)
+            dense_vector = self.dense_embedder.encode(chunk.text, is_document=True).tolist()
             sparse_vector = sparse_embeddings[idx]
 
             point = models.PointStruct(
@@ -145,7 +145,7 @@ class QdrantStore:
         sparse_query = list(self.sparse_embedder.query_embed(query))[0]
 
         # Формируем фильтры (Payload Filters)
-        must_conditions = []
+        must_conditions: list[models.Condition] = []
         if doi_filter:
             must_conditions.append(
                 models.FieldCondition(key="doi", match=models.MatchValue(value=doi_filter))
@@ -191,15 +191,19 @@ class QdrantStore:
             with_payload=True,
         )
 
-        return [
-            {
-                "chunk_id": point.id,
-                "text": point.payload.get("text", ""),
-                "doi": point.payload.get("doi", ""),
-                "section": point.payload.get("section_path", ""),
-                "raw_table_markup": point.payload.get("raw_table_markup"),
-                "raw_math_markup": point.payload.get("raw_math_markup"),
-                "linked_images": point.payload.get("linked_images"),
-            }
-            for point in results.points
-        ]
+        formatted_results = []
+        for point in results.points:
+            payload = point.payload or {}
+            formatted_results.append(
+                {
+                    "chunk_id": point.id,
+                    "text": payload.get("text", ""),
+                    "doi": payload.get("doi", ""),
+                    "section": payload.get("section_path", ""),
+                    "raw_table_markup": payload.get("raw_table_markup"),
+                    "raw_math_markup": payload.get("raw_math_markup"),
+                    "linked_images": payload.get("linked_images"),
+                }
+            )
+
+        return formatted_results
