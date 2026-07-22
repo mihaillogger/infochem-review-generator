@@ -1,7 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-
 from parser_db.main import app
 
 client = TestClient(app)
@@ -32,7 +31,7 @@ def test_search_validation_error_rfc9457() -> None:
 
 
 @patch("parser_db.main.parse_pdf_task.kiq", new_callable=AsyncMock)
-def test_ingest_documents_success(mock_kiq) -> None:
+def test_ingest_documents_success(mock_kiq: AsyncMock) -> None:
     """Проверяем, что эндпоинт загрузки корректно принимает список файлов."""
 
     class MockTask:

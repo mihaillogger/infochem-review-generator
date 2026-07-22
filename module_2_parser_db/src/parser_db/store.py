@@ -221,6 +221,7 @@ class QdrantStore:
 
 _store_instance = None
 
+
 def get_store() -> QdrantStore:
     """Паттерн Singleton (Ленивая инициализация).
 
