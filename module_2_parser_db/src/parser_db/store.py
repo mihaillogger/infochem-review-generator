@@ -217,3 +217,17 @@ class QdrantStore:
             )
 
         return formatted_results
+
+
+_store_instance = None
+
+def get_store() -> QdrantStore:
+    """Паттерн Singleton (Ленивая инициализация).
+
+    Подключение к БД произойдет только при первом реальном вызове,
+    а не при парсинге файлов линтерами или Pytest.
+    """
+    global _store_instance
+    if _store_instance is None:
+        _store_instance = QdrantStore()
+    return _store_instance

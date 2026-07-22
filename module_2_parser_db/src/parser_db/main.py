@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from parser_db.broker import broker
-from parser_db.store import QdrantStore
+from parser_db.store import get_store
 from parser_db.worker import parse_pdf_task
 
 
@@ -39,9 +39,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-
-# Инициализируем подключение к БД
-store = QdrantStore()
 
 
 # --- Строгие контракты (Enum) ---
@@ -137,6 +134,9 @@ async def validation_exception_handler(
 async def search_documents(request: SearchRequest, http_request: Request) -> Any:
     """Точка входа для агентов. Выполняет поиск Dense+Sparse с алгоритмом RRF."""
     try:
+        # БД инициализируется только в момент реального запроса
+        store = get_store()
+
         section_val = request.section_filter.value if request.section_filter else None
 
         results = store.hybrid_search(

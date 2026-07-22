@@ -7,9 +7,7 @@ from typing import Any
 from parser_db.broker import broker
 from parser_db.chunker import chunk_document
 from parser_db.extractor import build_parsed_document
-from parser_db.store import QdrantStore
-
-store = QdrantStore()
+from parser_db.store import get_store
 
 
 @broker.task(task_name="parse_pdf_task")
@@ -75,6 +73,8 @@ async def parse_pdf_task(file_paths: list[str]) -> dict[str, Any]:
         chunks = chunk_document(doc)
 
         if chunks:
+            # Инициализируем БД только тогда, когда есть что сохранять
+            store = get_store()
             store.insert_chunks(chunks)
 
         processed += 1
