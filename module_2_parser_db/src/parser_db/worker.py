@@ -5,8 +5,8 @@ from typing import Any
 
 from parser_db.broker import broker
 from parser_db.chunker import chunk_document
-from parser_db.store import get_store
 from parser_db.schemas import ParsedDocument
+from parser_db.store import get_store
 
 
 @broker.task(task_name="parse_pdf_task")
