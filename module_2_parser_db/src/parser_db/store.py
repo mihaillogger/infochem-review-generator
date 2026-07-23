@@ -112,7 +112,7 @@ class QdrantStore:
             point = models.PointStruct(
                 id=chunk.chunk_id,
                 vector={
-                    "dense_vector": dense_vector.tolist(),
+                    "dense_vector": dense_vector,
                     "sparse_vector": models.SparseVector(
                         indices=sparse_vector.indices.tolist(),
                         values=sparse_vector.values.tolist(),
