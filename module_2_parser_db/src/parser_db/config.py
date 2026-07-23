@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Инфраструктурные переменные
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0?health_check_interval=10"
 
     # Настройки Nomic
     EMBEDDING_MODEL_NAME: str = "nomic-ai/nomic-embed-text-v1.5"
