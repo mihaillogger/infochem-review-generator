@@ -6,15 +6,27 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.139.0",
+    "fastembed>=0.8.0",
+    "numpy>=2.4.6",
     "markdownify>=1.2.3",
     "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "qdrant-client>=1.18.0",
+    "sentence-transformers>=5.6.0",
+    "taskiq>=0.12.4",
+    "taskiq-redis>=1.2.3",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
     "uvicorn>=0.51.0",
+    "einops>=0.8.2",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=2.2.0",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.21",
 ]

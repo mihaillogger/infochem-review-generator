@@ -41,7 +41,7 @@ class ParsedDocument(BaseModel):
 
 
 class DBChunkMetadata(BaseModel):
-    """Метаданные чанка для сохранения в ChromaDB/Qdrant."""
+    """Метаданные чанка для сохранения в БД."""
 
     doi: str
     section_path: str = Field(
@@ -57,7 +57,19 @@ class DBChunkMetadata(BaseModel):
     )
     raw_math_markup: list[str] | None = Field(
         default=None,
-        description="Список оригинальных LaTeX формул в чанке",
+        description="Список оригинальных LaTeX формул в чанке (если contains_math=True)",
+    )
+    has_broken_table: bool = Field(default=False, description="Флаг: есть ли в чанке битая таблица")
+    has_broken_math: bool = Field(default=False, description="Флаг: есть ли в чанке битая формула")
+    fallback_table_paths: list[str] = Field(
+        default_factory=list,
+        description="Пути к картинкам битых таблиц для восстановления VLM-агеном "
+        "(если has_broken_table=True)",
+    )
+    fallback_math_paths: list[str] = Field(
+        default_factory=list,
+        description="Пути к картинкам битых формул для восстановления VLM-агентов "
+        "(если has_broken_math=True)",
     )
 
 
@@ -65,5 +77,5 @@ class DBChunk(BaseModel):
     """Объект чанка, готовый к загрузке в БД."""
 
     chunk_id: str
-    text: str = Field(..., description="Связный кусок текста")
+    text: str = Field(..., description="Связный кусок текста (один или несколько абзацев)")
     metadata: DBChunkMetadata

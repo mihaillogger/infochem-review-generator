@@ -1,19 +1,39 @@
 services:
-  # Сервис с FastAPI и парсером
-  parser_db:
+  # 1. FastAPI
+  api_server:
     build:
       context: ./module_2_parser_db
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     volumes:
-      # Общая папка только для сырых PDF и вырезанных картинок
-      - ./data:/data
-    environment:
-      - CHROMA_HOST=chroma_db
-      - CHROMA_PORT=8000
+      # Общие данные
+      - ${SHARED_DATA_ROOT}:/data
     depends_on:
-      - chroma_db
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  # 2. Воркер
+  worker:
+    build:
+      context: ./module_2_parser_db
+      dockerfile: Dockerfile
+    command: ["taskiq", "worker", "parser_db.broker:broker", "parser_db.worker"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ${SHARED_DATA_ROOT}:/data
+    depends_on:
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
     # проброс GPU
 #    deploy:
 #      resources:
@@ -23,14 +43,28 @@ services:
 #              count: all
 #              capabilities: [gpu]
 
-  # Сервис с векторной базой данных
-  chroma_db:
-    image: chromadb/chroma:latest
+  # 3. Векторная БД Qdrant
+  qdrant:
+    image: qdrant/qdrant:latest
     ports:
-      - "8001:8000"
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC
     volumes:
-      # Именованный том для хранения самих файлов базы
-      - chroma_data:/chroma/chroma
+      - qdrant_data:/qdrant/storage
+
+  # 4. Брокер
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
-  chroma_data:
+  qdrant_data:
+  redis_data:
