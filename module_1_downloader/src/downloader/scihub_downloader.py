@@ -236,7 +236,7 @@ def _try_mirror(context: BrowserContext, mirror: str, doi: str) -> str | None:
         page.close()
 
 
-def get_scihub_url_playwright(doi: str, *, headless: bool = False) -> str | None:
+def get_scihub_url_playwright(doi: str, *, headless: bool = True) -> str | None:
     """Второй этап: обход защиты с перехватом трафика, с перебором зеркал.
 
     Зеркала перебираем не ради обхода блокировок по IP (от них это не спасает —
@@ -244,16 +244,17 @@ def get_scihub_url_playwright(doi: str, *, headless: bool = False) -> str | None
     периодически умирают по решениям судов: живое зеркало сегодня может не
     отвечать завтра.
 
-    headless=False по умолчанию и менять не стоит: с headless=True проверка
-    не проходится (проверено на рабочем DOI — с окном качает, без окна нет),
-    видимо, режим распознаётся защитой. Отсюда неприятное следствие: пакетный
-    прогон идёт с открывающимся окном браузера и без человека не оставить.
+    headless=True работает через channel="chromium" — полный браузер без окна.
+    Ключевой нюанс: обычный headless поднимает урезанный chrome-headless-shell,
+    и его Sci-Hub распознаёт (проверено — PDF не ловится). Полный Chromium в
+    headless проходит проверку, поэтому на сервере окно не нужно.
     """
-    if headless:
-        print("[~] headless=True: на Sci-Hub так не проходит, ожидай провала.")
-
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        # channel="chromium" только в headless — иначе запускаем обычное окно.
+        launch_kwargs: dict[str, Any] = {"headless": headless}
+        if headless:
+            launch_kwargs["channel"] = "chromium"
+        browser = p.chromium.launch(**launch_kwargs)
         context = browser.new_context(
             user_agent=BROWSER_UA,
             viewport={"width": 1280, "height": 720},
@@ -418,7 +419,7 @@ def _browser_download(
         page.close()
 
 
-def download_via_browser(urls: list[str], save_path: Path, *, headless: bool = False) -> str | None:
+def download_via_browser(urls: list[str], save_path: Path, *, headless: bool = True) -> str | None:
     """Пробует забрать PDF браузером по каждой ссылке; вернёт сработавшую."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -446,7 +447,7 @@ def fetch_article(
     doi: str,
     save_dir: Path | str = ".",
     *,
-    headless: bool = False,
+    headless: bool = True,
     use_scihub: bool = True,
 ) -> FetchResult:
     """Основной оркестратор: достать ссылку и скачать PDF по одному DOI.
@@ -541,7 +542,7 @@ def run(
     mailto: str | None = None,
     pdf_dir: Path = PDF_DIR,
     metadata_path: Path = METADATA_PATH,
-    headless: bool = False,
+    headless: bool = True,
     limit: int | None = None,
     use_scihub: bool = True,
 ) -> dict[str, dict[str, Any]]:
@@ -558,9 +559,9 @@ def run(
         mailto: e-mail для polite pool CrossRef.
         pdf_dir: куда складывать PDF (общий volume Модуля 2).
         metadata_path: куда писать контракт metadata.json.
-        headless: гонять браузер Sci-Hub без окна. Не работает — защита
-            распознаёт headless; оставлено параметром на случай, если
-            когда-нибудь заработает.
+        headless: без окна (по умолчанию) — так работает на сервере. Полный
+            Chromium (channel="chromium") проходит защиту Sci-Hub. False —
+            открыть окно для локальной отладки.
         limit: ограничить число скачиваний (удобно для проверки связки).
         use_scihub: пробовать ли Sci-Hub. Выключить для захода с VPN —
             под VPN Sci-Hub закрыт, зато открываются гео-ограниченные
