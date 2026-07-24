@@ -162,6 +162,17 @@ def get_oa_urls(doi: str) -> list[str]:
     return candidates
 
 
+def _launch_chromium(p: Any, *, headless: bool) -> Any:
+    """Запуск Chromium. В headless берём ПОЛНЫЙ браузер (channel="chromium"),
+    а не урезанный chrome-headless-shell: последний распознаётся защитами
+    издателей и Sci-Hub, полный — проходит. С окном channel не нужен.
+    """
+    kwargs: dict[str, Any] = {"headless": headless}
+    if headless:
+        kwargs["channel"] = "chromium"
+    return p.chromium.launch(**kwargs)
+
+
 def _try_mirror(context: BrowserContext, mirror: str, doi: str) -> str | None:
     """Одна попытка достать PDF с конкретного зеркала."""
     page = context.new_page()
@@ -250,11 +261,7 @@ def get_scihub_url_playwright(doi: str, *, headless: bool = True) -> str | None:
     headless проходит проверку, поэтому на сервере окно не нужно.
     """
     with sync_playwright() as p:
-        # channel="chromium" только в headless — иначе запускаем обычное окно.
-        launch_kwargs: dict[str, Any] = {"headless": headless}
-        if headless:
-            launch_kwargs["channel"] = "chromium"
-        browser = p.chromium.launch(**launch_kwargs)
+        browser = _launch_chromium(p, headless=headless)
         context = browser.new_context(
             user_agent=BROWSER_UA,
             viewport={"width": 1280, "height": 720},
@@ -422,7 +429,7 @@ def _browser_download(
 def download_via_browser(urls: list[str], save_path: Path, *, headless: bool = True) -> str | None:
     """Пробует забрать PDF браузером по каждой ссылке; вернёт сработавшую."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        browser = _launch_chromium(p, headless=headless)
         context = browser.new_context(
             user_agent=BROWSER_UA,
             viewport={"width": 1280, "height": 720},
@@ -476,15 +483,11 @@ def fetch_article(
                 return FetchResult(ok=True, pdf_path=str(save_path), source="oa")
         # HTTP-клиента издатели часто отшивают по 403, а браузер пускают —
         # ссылки-то рабочие, проверено руками. Поэтому прежде чем идти на
-        # Sci-Hub, пробуем те же самые OA-ссылки, но через Playwright.
-        # Сначала headless: быстро и без окон, так берётся большинство копий.
-        # Но часть издателей его распознаёт — MDPI отдал файл только с видимым
-        # окном, ровно как Sci-Hub. Поэтому упрямых добиваем вторым заходом.
+        # Sci-Hub, пробуем те же самые OA-ссылки через Playwright. Полный
+        # Chromium в headless проходит даже MDPI (проверено), так что окно
+        # тут не нужно — одного захода достаточно.
         print("[!] HTTP-клиент не справился. Пробуем те же ссылки браузером...")
-        used = download_via_browser(candidates, save_path, headless=True)
-        if not used:
-            print("[!] Headless не прошёл. Повторяем с видимым окном...")
-            used = download_via_browser(candidates, save_path, headless=False)
+        used = download_via_browser(candidates, save_path)
         if used:
             print(f"[+] Сохранено: {save_path}")
             return FetchResult(ok=True, pdf_path=str(save_path), source="oa")
