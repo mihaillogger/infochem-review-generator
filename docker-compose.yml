@@ -7,7 +7,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - ./module_2_parser_db/.env
     volumes:
       # Общие данные
       - ${SHARED_DATA_ROOT}:/data
@@ -26,7 +26,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     env_file:
-      - .env
+      - ./module_2_parser_db/.env
     volumes:
       - ${SHARED_DATA_ROOT}:/data
     depends_on:
