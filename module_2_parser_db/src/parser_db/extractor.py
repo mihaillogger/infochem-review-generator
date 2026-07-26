@@ -1,22 +1,35 @@
 """Модуль для извлечения данных MinerU и преобразования их в схемы."""
 
 import re
+from enum import Enum
 from typing import Any
 
 from markdownify import markdownify as md
 
-from parser_db.equations import fix_latex_brackets, validate_latex
+from parser_db.equations import validate_latex
 from parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
+
+
+class SectionType(str, Enum):
+    """Перечисление стандартизированных разделов для химических review-статей."""
+    
+    ABSTRACT = "Abstract"
+    INTRODUCTION = "Introduction"
+    CONCEPTS_AND_MECHANISMS = "Concepts & Mechanisms"
+    MATERIALS_AND_SYNTHESIS = "Materials & Synthesis"
+    APPLICATIONS = "Applications & Devices"
+    PERSPECTIVES_AND_CONCLUSIONS = "Perspectives & Conclusions"
+    UNKNOWN = "Unknown"
 
 
 def optimize_table_markup(html_markup: str) -> str:
     """Адаптивно сжимает таблицу: простую в Markdown, сложную — в HTML.
 
     Args:
-        html_markup (str): Сырой HTML-код таблицы.
+        html_markup: Сырой HTML-код таблицы.
 
     Returns:
-        str: Оптимизированный Markdown или минифицированный HTML.
+        Оптимизированный Markdown или минифицированный HTML.
     """
     is_complex = "colspan" in html_markup.lower() or "rowspan" in html_markup.lower()
 
@@ -35,45 +48,50 @@ def optimize_table_markup(html_markup: str) -> str:
         clean_html,
         flags=re.IGNORECASE,
     )
-    clean_html = re.sub(r">\s+<", "><", clean_html)
-
-    return clean_html.strip()
+    return re.sub(r">\s+<", "><", clean_html).strip()
 
 
-def normalize_section_name(heading: str) -> str:
-    """Приводит сырой заголовок к Pydantic Enum для API-шлюза.
+def normalize_section_name(heading: str) -> SectionType:
+    """Приводит сырой заголовок обзорной статьи к строгому Enum.
 
     Args:
-        heading (str): Исходный текст заголовка.
+        heading: Исходный текст заголовка.
 
     Returns:
-        str: Стандартизированное название секции или исходный заголовок.
+        Стандартизированное название секции макро-уровня.
     """
     h_lower = heading.lower()
+    
     if "abstract" in h_lower:
-        return "Abstract"
-    if "intro" in h_lower:
-        return "Introduction"
-    if any(x in h_lower for x in ["method", "experiment", "procedure", "material"]):
-        return "Methodology"
-    if "result" in h_lower:
-        return "Results"
-    if "discuss" in h_lower:
-        return "Discussion"
-    if "conclus" in h_lower or "summary" in h_lower:
-        return "Conclusion"
-    return heading
+        return SectionType.ABSTRACT
+        
+    if "intro" in h_lower or "background" in h_lower:
+        return SectionType.INTRODUCTION
+        
+    if any(x in h_lower for x in ["concept", "mechanism", "principle", "theory", "interaction", "behavior"]):
+        return SectionType.CONCEPTS_AND_MECHANISMS
+        
+    if any(x in h_lower for x in ["material", "synthesis", "fabrication", "preparation", "structure", "composite", "hybrid", "nanostructuring", "route"]):
+        return SectionType.MATERIALS_AND_SYNTHESIS
+        
+    if any(x in h_lower for x in ["application", "device", "delivery", "therapy", "sensor", "patterning", "coating"]):
+        return SectionType.APPLICATIONS
+        
+    if any(x in h_lower for x in ["conclus", "summary", "prospect", "perspective", "future", "outlook"]):
+        return SectionType.PERSPECTIVES_AND_CONCLUSIONS
+        
+    return SectionType.UNKNOWN
 
 
 def extract_exact_visual_id(caption: str, default_id: str) -> str:
-    """Вытягивает точный ID (например, 'Fig. 1') из подписи для препроцессора.
+    """Вытягивает точный ID из подписи для препроцессора.
 
     Args:
-        caption (str): Подпись к графику или таблице.
-        default_id (str): ID по умолчанию, если паттерн не найден.
+        caption: Подпись к графику или таблице.
+        default_id: ID по умолчанию, если паттерн не найден.
 
     Returns:
-        str: Точный идентификатор объекта.
+        Точный идентификатор объекта.
     """
     if not caption:
         return default_id
@@ -85,14 +103,29 @@ def extract_exact_visual_id(caption: str, default_id: str) -> str:
     return match.group(1).strip() if match else default_id
 
 
+def is_smiles(text: str) -> bool:
+    """Проверяет, похожа ли строка на химическую нотацию SMILES.
+
+    Args:
+        text: Строка для проверки.
+
+    Returns:
+        True, если строка содержит только допустимые для SMILES символы.
+    """
+    smiles_pattern = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)\\=#/]+$")
+    return bool(smiles_pattern.match(text))
+
+
 def is_table_broken(html_markup: str) -> bool:
     """Определяет, сломана ли структура HTML-таблицы парсером.
 
+    Отдельно проверяет длинные слова, игнорируя ссылки и SMILES.
+
     Args:
-        html_markup (str): Сырой HTML-код таблицы.
+        html_markup: Сырой HTML-код таблицы.
 
     Returns:
-        bool: True, если найдены аномалии, иначе False.
+        True, если найдены аномалии, иначе False.
     """
     if not html_markup or len(html_markup) < 30:
         return True
@@ -100,8 +133,9 @@ def is_table_broken(html_markup: str) -> bool:
     clean_text = re.sub(r"<[^>]+>", " ", html_markup)
     words = clean_text.split()
 
-    if any(len(w) > 35 and "http" not in w for w in words):
-        return True
+    for w in words:
+        if len(w) > 35 and "http" not in w and not is_smiles(w):
+            return True
 
     empty_cells = html_markup.count("<td></td>") + html_markup.count("<td> </td>")
     total_cells = html_markup.count("<td")
@@ -109,26 +143,22 @@ def is_table_broken(html_markup: str) -> bool:
     if total_cells > 0 and (empty_cells / total_cells) > 0.4:
         return True
 
-    if html_markup.count("<tr") != html_markup.count("</tr"):
-        return True
-
-    return False
+    return html_markup.count("<tr") != html_markup.count("</tr")
 
 
 def clean_text_lite(text: str) -> str:
     """Очищает текст от базовых артефактов MinerU.
 
     Args:
-        text (str): Исходный сырой текст.
+        text: Исходный сырой текст.
 
     Returns:
-        str: Нормализованный текст без висячих дефисов и лишних тегов.
+        Нормализованный текст без висячих дефисов и лишних тегов.
     """
     text = text.replace("\u0001", "°").replace("\u0003", "-")
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def build_parsed_document(
@@ -136,21 +166,23 @@ def build_parsed_document(
 ) -> ParsedDocument:
     """Собирает объект ParsedDocument из сырого JSON MinerU.
 
-    Группирует абзацы по разделам, конвертирует HTML-таблицы в Markdown,
-    лечит битый LaTeX и извлекает метаданные графики.
+    Группирует абзацы по разделам, конвертирует HTML-таблицы в Markdown
+    и извлекает метаданные графики. Невалидный LaTeX помечается как битый.
 
     Args:
-        mineru_data (list[dict[str, Any]]): Список блоков из JSON.
-        doi (str): Уникальный идентификатор статьи.
-        title (str): Название статьи.
+        mineru_data: Список блоков из JSON.
+        doi: Уникальный идентификатор статьи.
+        title: Название статьи.
 
     Returns:
-        ParsedDocument: Валидированный Pydantic-объект статьи.
+        Валидированный Pydantic-объект статьи.
     """
     sections: list[Section] = []
     visuals: list[VisualMeta] = []
 
-    current_heading = "Metadata / Abstract"
+    current_heading_str = "Metadata / Abstract"
+    current_heading_enum = SectionType.ABSTRACT
+    
     current_paragraphs: list[Paragraph] = []
     current_level = 1
 
@@ -161,19 +193,19 @@ def build_parsed_document(
         content = clean_text_lite(raw_content) if block_type == "text" else raw_content
 
         if block_type == "text" and "text_level" in block:
-            if content == current_heading:
+            if content == current_heading_str:
                 continue
 
             if current_paragraphs:
-                normalized_heading = normalize_section_name(current_heading)
                 sections.append(
                     Section(
-                        heading=normalized_heading,
+                        heading=current_heading_enum.value,
                         level=current_level,
                         paragraphs=current_paragraphs,
                     )
                 )
-            current_heading = content
+            current_heading_str = content
+            current_heading_enum = normalize_section_name(content)
             current_level = block.get("text_level", 1)
             current_paragraphs = []
             continue
@@ -184,18 +216,14 @@ def build_parsed_document(
             if validate_latex(content):
                 current_paragraphs.append(Paragraph(type="equation", content=content))
             else:
-                fixed_content = fix_latex_brackets(content)
-                if validate_latex(fixed_content):
-                    current_paragraphs.append(Paragraph(type="equation", content=fixed_content))
-                else:
-                    current_paragraphs.append(
-                        Paragraph(
-                            type="equation",
-                            content=content,
-                            is_broken=True,
-                            image_fallback_path=img_path,
-                        )
+                current_paragraphs.append(
+                    Paragraph(
+                        type="equation",
+                        content=content,
+                        is_broken=True,
+                        image_fallback_path=img_path,
                     )
+                )
             continue
 
         if block_type in ["image", "table", "chart"]:
@@ -241,10 +269,9 @@ def build_parsed_document(
             current_paragraphs.append(Paragraph(type="text", content=content))
 
     if current_paragraphs:
-        normalized_heading = normalize_section_name(current_heading)
         sections.append(
             Section(
-                heading=normalized_heading,
+                heading=current_heading_enum.value,
                 level=current_level,
                 paragraphs=current_paragraphs,
             )
