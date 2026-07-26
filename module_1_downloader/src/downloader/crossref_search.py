@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import statistics
+import time
 from typing import Any, cast
 
 import httpx
@@ -26,6 +27,13 @@ MIN_N = 5  # не меньше — иначе тема почти пустая
 MAX_N = 40  # не больше — дальше почти наверняка шум
 TAIL = 20  # сколько статей с конца считаем шумовым полом
 TIMEOUT = 20.0
+
+# CrossRef регулярно моргает 5xx. Без повтора один такой ответ ронял бы весь
+# прогон на первом же поиске, поэтому временные коды и сетевые сбои повторяем
+# с нарастающей паузой. 4xx (кроме 429) повторять бессмысленно — сразу отдаём.
+RETRIABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+SEARCH_RETRY_ATTEMPTS = 4
+SEARCH_RETRY_BACKOFF = 2.0  # 2, 4, 8 секунд между попытками
 
 
 def _build_filters(from_year: int, until_year: int) -> str:
@@ -56,12 +64,39 @@ def _search_pool(
         "order": "desc",
         "rows": POOL,
     }
-    resp = client.get(CROSSREF_URL, params=params, timeout=TIMEOUT)
-    resp.raise_for_status()
+    resp = _get_with_retry(client, params)
     payload: dict[str, Any] = resp.json()
     items = cast(list[dict[str, Any]], payload["message"]["items"])
     items.sort(key=lambda w: w.get("score", 0.0), reverse=True)
     return items
+
+
+def _get_with_retry(client: httpx.Client, params: dict[str, str | int]) -> httpx.Response:
+    """GET к CrossRef с повтором на временных сбоях (5xx, 429, обрыв связи).
+
+    Возвращает успешный ответ. Если все попытки исчерпаны — пробрасывает
+    последнюю ошибку, чтобы прогон упал явно, а не молча искал по пустому.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(SEARCH_RETRY_ATTEMPTS):
+        try:
+            resp = client.get(CROSSREF_URL, params=params, timeout=TIMEOUT)
+            if resp.status_code not in RETRIABLE_STATUS:
+                resp.raise_for_status()  # 2xx пройдёт, фатальный 4xx бросит сразу
+                return resp
+            print(f"[~] CrossRef {resp.status_code}, попытка {attempt + 1}/{SEARCH_RETRY_ATTEMPTS}")
+            last_exc = httpx.HTTPStatusError(
+                f"{resp.status_code}", request=resp.request, response=resp
+            )
+        except httpx.TransportError as e:  # таймаут, обрыв, DNS — тоже временное
+            print(f"[~] CrossRef {type(e).__name__}, попытка {attempt + 1}/{SEARCH_RETRY_ATTEMPTS}")
+            last_exc = e
+
+        if attempt < SEARCH_RETRY_ATTEMPTS - 1:
+            time.sleep(SEARCH_RETRY_BACKOFF * (2**attempt))
+
+    assert last_exc is not None
+    raise last_exc
 
 
 def _adaptive_cutoff(scores: list[float]) -> int:
