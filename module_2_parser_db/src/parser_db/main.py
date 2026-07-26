@@ -1,21 +1,27 @@
 """API-шлюз Модуля 2.
 
-Реализует REST-интерфейс для поиска по базе знаний и асинхронного парсинга PDF.
+Реализует REST-интерфейс для поиска по базе знаний и
+асинхронной векторизации обработанных документов.
 """
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
-from fastapi import FastAPI, Request, status
+import structlog
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 from parser_db.broker import broker
-from parser_db.store import get_store
+from parser_db.config import settings
+from parser_db.logger import setup_logging
+from parser_db.schemas import IngestRequest, RFC9457Error, SearchRequest, SearchResponse
+from parser_db.store import AsyncQdrantStore, get_store
 from parser_db.worker import parse_pdf_task
+
+setup_logging()
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -28,65 +34,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Args:
         app: Экземпляр приложения FastAPI.
     """
+    logger.info("system_startup", message="Starting Infochem RAG Core...")
     await broker.startup()
+    await get_store()
+    logger.info("system_ready", message="Vector DB and Models are loaded.")
     yield
     await broker.shutdown()
+    logger.info("system_shutdown", message="Shutting down...")
 
 
 app = FastAPI(
-    title="Infochem RAG Core API",
-    description="Ядро семантического поиска и парсинга научных статей.",
-    version="1.0.0",
+    title=settings.API_TITLE,
+    description=settings.API_DESCRIPTION,
+    version=settings.API_VERSION,
     lifespan=lifespan,
 )
-
-
-# --- Строгие контракты (Enum) ---
-
-
-class StandardSection(StrEnum):
-    """Стандартизированные разделы научных статей для фильтрации."""
-
-    ABSTRACT = "Abstract"
-    INTRODUCTION = "Introduction"
-    METHODOLOGY = "Methodology"
-    RESULTS = "Results"
-    CONCLUSION = "Conclusion"
-    DISCUSSION = "Discussion"
-
-
-# --- Схемы запросов (Pydantic Контракты) ---
-
-
-class SearchRequest(BaseModel):
-    """Схема запроса для поиска фактов LLM-агентом."""
-
-    query: str = Field(
-        ...,
-        description="Поисковый запрос на естественном языке "
-        "(например, 'методы синтеза перовскитов').",
-    )
-    limit: int = Field(default=5, ge=1, le=20, description="Количество возвращаемых чанков.")
-    doi_filter: str | None = Field(default=None, description="Ограничить поиск конкретным DOI.")
-    section_filter: StandardSection | None = Field(
-        default=None,
-        description="Искать только в определенном разделе. "
-        "Используй строго одно из доступных значений.",
-    )
-    require_table: bool = Field(
-        default=False, description="Вернуть только те чанки, которые содержат таблицы."
-    )
-    require_math: bool = Field(
-        default=False, description="Вернуть только те чанки, которые содержат формулы."
-    )
-
-
-class IngestRequest(BaseModel):
-    """Схема запроса от Модуля 1 на старт парсинга."""
-
-    file_paths: list[str] = Field(
-        ..., description="Список абсолютных путей к скачанным PDF в томе /data/pdfs/."
-    )
 
 
 # --- RFC 9457 Обработчики ошибок ---
@@ -110,36 +72,45 @@ async def validation_exception_handler(
         msg = err["msg"]
         llm_instructions += f"Ошибка в поле '{loc}': {msg}. "
 
-    llm_instructions += (
-        "Изучи OpenAPI спецификацию этого метода, исправь тип данных и повтори вызов."
+    llm_instructions += settings.LLM_INSTRUCTION_VALIDATION
+
+    error_response = RFC9457Error(
+        type=settings.RFC_TYPE_VALIDATION,
+        title="Unprocessable Entity (Validation Error)",
+        status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=llm_instructions,
+        instance=str(request.url),
+        errors=cast(list[dict[str, Any]], errors),
     )
+
+    logger.warning("agent_validation_error", url=str(request.url), errors=errors)
 
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "type": "https://datatracker.ietf.org/doc/html/rfc9457#section-3",
-            "title": "Unprocessable Entity (Validation Error)",
-            "status": status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "detail": llm_instructions,
-            "instance": str(request.url),
-            "errors": errors,
-        },
+        content=error_response.model_dump(),
     )
 
 
 # --- API Эндпоинты ---
 
 
-@app.post("/api/v1/search", summary="Гибридный поиск по базе знаний")
-async def search_documents(request: SearchRequest, http_request: Request) -> Any:
+@app.post(
+    "/api/v1/search",
+    summary="Гибридный поиск по базе знаний",
+    response_model=SearchResponse,
+    responses={
+        422: {"model": RFC9457Error, "description": "Ошибка валидации запроса"},
+        500: {"model": RFC9457Error, "description": "Внутренняя ошибка сервера"},
+    },
+)
+async def search_documents(
+    request: SearchRequest, http_request: Request, store: AsyncQdrantStore = Depends(get_store)
+) -> Any:
     """Точка входа для агентов. Выполняет поиск Dense+Sparse с алгоритмом RRF."""
     try:
-        # БД инициализируется только в момент реального запроса
-        store = get_store()
-
         section_val = request.section_filter.value if request.section_filter else None
 
-        results = store.hybrid_search(
+        results = await store.hybrid_search(
             query=request.query,
             limit=request.limit,
             doi_filter=request.doi_filter,
@@ -147,32 +118,40 @@ async def search_documents(request: SearchRequest, http_request: Request) -> Any
             require_table=request.require_table,
             require_math=request.require_math,
         )
+
+        logger.info("hybrid_search_success", query=request.query, returned_chunks=len(results))
+
         return {"status": "success", "count": len(results), "data": results}
     except Exception as e:
+        logger.exception("hybrid_search_failed", query=request.query, error=str(e))
+
+        error_response = RFC9457Error(
+            type=settings.RFC_TYPE_INTERNAL,
+            title="Internal Server Error",
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{settings.LLM_INSTRUCTION_INTERNAL} Техническая деталь: {str(e)}",
+            instance=str(http_request.url),
+        )
+
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "type": "about:blank",
-                "title": "Internal Server Error",
-                "status": 500,
-                "detail": f"Внутренняя ошибка векторной БД: {str(e)}. "
-                f"Попробуй изменить параметры запроса.",
-                "instance": str(http_request.url),
-            },
+            content=error_response.model_dump(),
         )
 
 
 @app.post(
     "/api/v1/documents",
-    summary="Запуск индексации PDF (Асинхронно)",
+    summary="Запуск чанкинга и векторизации обработанных документов",
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def ingest_documents(request: IngestRequest) -> dict[str, str]:
-    """Точка входа для Модуля 1. Отправляет задачу в воркер TaskIQ."""
+    """Отправляет задачу векторизации в воркер TaskIQ."""
     task = await parse_pdf_task.kiq(request.file_paths)
+
+    logger.info("ingest_task_created", task_id=task.task_id, files_count=len(request.file_paths))
 
     return {
         "status": "accepted",
-        "message": "Задачи на парсинг успешно добавлены в очередь.",
+        "message": "Задачи на векторизацию успешно добавлены в очередь.",
         "task_id": task.task_id,
     }
