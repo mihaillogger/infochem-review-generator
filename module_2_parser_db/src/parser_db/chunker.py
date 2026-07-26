@@ -1,6 +1,7 @@
 """Модуль семантического чанкинга на основе подготовленных блоков текста."""
 
 import uuid
+import structlog
 from typing import Any, TypedDict
 
 import numpy as np
@@ -9,11 +10,16 @@ from parser_db.config import settings
 from parser_db.embedder import NomicEmbedder
 from parser_db.preprocessor import (
     build_sandwiches,
+    build_visuals_patterns,
     count_tokens,
-    extract_validated_visuals,
+    extract_visual_ids,
     split_recursively,
 )
+from parser_db.profiler import profile_time
 from parser_db.schemas import DBChunk, DBChunkMetadata, ParsedDocument
+
+
+logger = structlog.get_logger(__name__)
 
 # Инициализируем модель
 embedder = NomicEmbedder()
@@ -26,6 +32,7 @@ class ChunkMeta(TypedDict):
     raw_math_markup: list[str]
     has_broken_table: bool
     has_broken_math: bool
+    has_broken_text: bool
     fallback_table_paths: list[str]
     fallback_math_paths: list[str]
 
@@ -76,6 +83,7 @@ def _save_chunk(
         raw_math_markup=meta.get("raw_math_markup") if meta.get("raw_math_markup") else None,
         has_broken_table=meta.get("has_broken_table", False),
         has_broken_math=meta.get("has_broken_math", False),
+        has_broken_text=meta.get("has_broken_text", False),
         fallback_table_paths=meta.get("fallback_table_paths", []),
         fallback_math_paths=meta.get("fallback_math_paths", []),
     )
@@ -85,6 +93,7 @@ def _save_chunk(
     )
 
 
+@profile_time
 def chunk_document(document: ParsedDocument) -> list[DBChunk]:
     """
     Пайплайн нарезки документа на семантические чанки со скользящим средним.
@@ -95,28 +104,47 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
     Returns:
         list[DBChunk]: Готовые чанки для загрузки в БД.
     """
+    logger.info("chunking_started", doi=document.doi, sections_count=len(document.sections))
+
     chunks: list[DBChunk] = []
 
+    # Компилируем регулярки для всей статьи
+    visual_patterns = build_visuals_patterns(document.visuals)
+
+    # Стек для отслеживания иерархии заголовков
+    # Кортежи вида (level, heading)
+    heading_stack: list[tuple[int, str]] = []
+
     for section in document.sections:
+        # Выкидываем из стека все заголовки, чей уровень больше или равен текущему
+        while heading_stack and heading_stack[-1][0] >= section.level:
+            heading_stack.pop()
+
+        # Кладем текущий заголовок в стек
+        heading_stack.append((section.level, section.heading))
+
+        # Склеиваем весь стек в строку "H1 > H2 > H3"
+        current_section_path = " > ".join(heading for _, heading in heading_stack)
+
         raw_blocks = build_sandwiches(section.paragraphs)
         if not raw_blocks:
             continue
 
         # 1. Разбиваем огромные блоки рекурсивным сплиттером
-        blocks: list[dict[str, Any]] = []
+        blocks: list[Any] = []
         for block in raw_blocks:
             if count_tokens(block["text"]) > settings.CHUNK_LIMIT and not block.get("is_sandwich"):
-                split_texts = split_recursively(block["text"], settings.CHUNK_LIMIT)
+                split_texts, is_broken_text = split_recursively(block["text"], settings.CHUNK_LIMIT)
                 for st in split_texts:
-                    blocks.append({**block, "text": st})
+                    blocks.append({**block, "text": st, "is_broken_text": is_broken_text})
             else:
-                blocks.append(block)
+                blocks.append({**block, "is_broken_text": False})
 
         if not blocks:
             continue
 
         # 2. Вычисляем эмбеддинги и косинусное сходство
-        embeddings = np.array([embedder.encode(b["text"], is_document=True) for b in blocks])
+        embeddings = embedder.encode_batch([b["text"] for b in blocks], is_document=True)
 
         similarities = [
             _cosine_similarity(embeddings[i], embeddings[i + 1]) for i in range(len(blocks) - 1)
@@ -147,6 +175,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
             "raw_math_markup": [],
             "has_broken_table": False,
             "has_broken_math": False,
+            "has_broken_text": False,
             "fallback_table_paths": [],
             "fallback_math_paths": [],
         }
@@ -164,7 +193,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
             if token_overflow or table_collision:
                 _save_chunk(
                     document.doi,
-                    section.heading,
+                    current_section_path,
                     current_chunk_text,
                     current_meta,
                     linked_images,
@@ -179,6 +208,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                     "raw_math_markup": [],
                     "has_broken_table": False,
                     "has_broken_math": False,
+                    "has_broken_text": False,
                     "fallback_table_paths": [],
                     "fallback_math_paths": [],
                 }
@@ -208,13 +238,13 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                 if block.get("fallback_math_path"):
                     current_meta["fallback_math_paths"].append(block["fallback_math_path"])
 
-            linked_images.update(extract_validated_visuals(block["text"], document.visuals))
+            linked_images.update(extract_visual_ids(block["text"], visual_patterns))
 
             # Семантический разрыв ПОСЛЕ добавления блока (по скользящему среднему)
             if i in cut_indices and current_chunk_text and i < len(blocks) - 1:
                 _save_chunk(
                     document.doi,
-                    section.heading,
+                    current_section_path,
                     current_chunk_text,
                     current_meta,
                     linked_images,
@@ -229,6 +259,7 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
                     "raw_math_markup": [],
                     "has_broken_table": False,
                     "has_broken_math": False,
+                    "has_broken_text": False,
                     "fallback_table_paths": [],
                     "fallback_math_paths": [],
                 }
@@ -238,11 +269,12 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
         if current_chunk_text:
             _save_chunk(
                 document.doi,
-                section.heading,
+                current_section_path,
                 current_chunk_text,
                 current_meta,
                 linked_images,
                 chunks,
             )
 
+    logger.info("chunking_finished", doi=document.doi, total_chunks=len(chunks))
     return chunks
