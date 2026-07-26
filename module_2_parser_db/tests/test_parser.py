@@ -41,24 +41,18 @@ def test_is_smiles() -> None:
 def test_normalize_section_name() -> None:
     """Проверяет маппинг заголовков обзорных статей к строгому Enum SectionType."""
     assert normalize_section_name("1. Introduction") == SectionType.INTRODUCTION
-    
+
     assert (
-        normalize_section_name("Reaction Mechanisms and Theory") 
+        normalize_section_name("Reaction Mechanisms and Theory")
         == SectionType.CONCEPTS_AND_MECHANISMS
     )
-    
-    assert (
-        normalize_section_name("Nanomaterial Synthesis") 
-        == SectionType.MATERIALS_AND_SYNTHESIS
-    )
-    
+
+    assert normalize_section_name("Nanomaterial Synthesis") == SectionType.MATERIALS_AND_SYNTHESIS
+
     assert normalize_section_name("Clinical Applications") == SectionType.APPLICATIONS
-    
-    assert (
-        normalize_section_name("Future Perspectives") 
-        == SectionType.PERSPECTIVES_AND_CONCLUSIONS
-    )
-    
+
+    assert normalize_section_name("Future Perspectives") == SectionType.PERSPECTIVES_AND_CONCLUSIONS
+
     assert normalize_section_name("Custom Header") == SectionType.UNKNOWN
 
 
@@ -75,7 +69,7 @@ def test_table_optimization_and_validation() -> None:
     clean_complex_html = (
         '<table><tr><th colspan="2">A</th></tr><tr><td>B</td><td>C</td></tr></table>'
     )
-    
+
     broken_html = f"<table><tr><td>{'a' * 40}</td></tr></table>"
     smiles_html = f"<table><tr><td>{'C' * 40}</td></tr></table>"
 
@@ -94,7 +88,7 @@ def test_build_parsed_document_structure() -> None:
         {"type": "text", "text": "This is a test paragraph."},
         {
             "type": "equation",
-            "text": "\\frac{1}{2",  
+            "text": "\\frac{1}{2",
             "img_path": "/img/broken.png",
         },
         {

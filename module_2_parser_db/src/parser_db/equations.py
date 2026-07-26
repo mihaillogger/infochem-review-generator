@@ -21,7 +21,7 @@ def validate_latex(latex_str: str) -> bool:
     # Валидация окружений \begin{} ... \end{}
     env_stack: list[str] = []
     env_pattern = re.compile(r"\\(?:begin|end)\{([^}]+)\}")
-    
+
     for match in env_pattern.finditer(latex_str):
         full_match = match.group(0)
         env_name = match.group(1)

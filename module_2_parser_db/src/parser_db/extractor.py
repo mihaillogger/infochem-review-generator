@@ -12,7 +12,7 @@ from parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
 
 class SectionType(StrEnum):
     """Перечисление стандартизированных разделов для химических review-статей."""
-    
+
     ABSTRACT = "Abstract"
     INTRODUCTION = "Introduction"
     CONCEPTS_AND_MECHANISMS = "Concepts & Mechanisms"
@@ -61,32 +61,39 @@ def normalize_section_name(heading: str) -> SectionType:
         Стандартизированное название секции макро-уровня.
     """
     h_lower = heading.lower()
-    
+
     if "abstract" in h_lower:
         return SectionType.ABSTRACT
-        
+
     if "intro" in h_lower or "background" in h_lower:
         return SectionType.INTRODUCTION
-        
+
     concepts_kw = ["concept", "mechanism", "principle", "theory", "interaction", "behavior"]
     if any(x in h_lower for x in concepts_kw):
         return SectionType.CONCEPTS_AND_MECHANISMS
-        
+
     materials_kw = [
-        "material", "synthesis", "fabrication", "preparation", 
-        "structure", "composite", "hybrid", "nanostructuring", "route"
+        "material",
+        "synthesis",
+        "fabrication",
+        "preparation",
+        "structure",
+        "composite",
+        "hybrid",
+        "nanostructuring",
+        "route",
     ]
     if any(x in h_lower for x in materials_kw):
         return SectionType.MATERIALS_AND_SYNTHESIS
-        
+
     apps_kw = ["application", "device", "delivery", "therapy", "sensor", "patterning", "coating"]
     if any(x in h_lower for x in apps_kw):
         return SectionType.APPLICATIONS
-        
+
     conclusions_kw = ["conclus", "summary", "prospect", "perspective", "future", "outlook"]
     if any(x in h_lower for x in conclusions_kw):
         return SectionType.PERSPECTIVES_AND_CONCLUSIONS
-        
+
     return SectionType.UNKNOWN
 
 
@@ -189,7 +196,7 @@ def build_parsed_document(
 
     current_heading_str = "Metadata / Abstract"
     current_heading_enum = SectionType.ABSTRACT
-    
+
     current_paragraphs: list[Paragraph] = []
     current_level = 1
 
