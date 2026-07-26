@@ -1,14 +1,13 @@
 """Модуль предобработки распарсенного текста перед чанкингом."""
 
 import re
-import structlog
 from typing import TypedDict
 
+import structlog
 from transformers import AutoTokenizer
 
 from parser_db.config import settings
 from parser_db.schemas import Paragraph, VisualMeta
-
 
 logger = structlog.get_logger(__name__)
 
@@ -84,7 +83,7 @@ def split_recursively(text: str, max_tokens: int) -> tuple[list[str], bool]:
     logger.warning("fallback_token_split_used", text_length=len(text))
 
     tokens = tokenizer.encode(text)
-    chunks = [tokens[i: i + max_tokens] for i in range(0, len(tokens), max_tokens)]
+    chunks = [tokens[i : i + max_tokens] for i in range(0, len(tokens), max_tokens)]
 
     return [str(tokenizer.decode(chunk)) for chunk in chunks], True
 

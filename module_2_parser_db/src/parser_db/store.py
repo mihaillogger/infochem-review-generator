@@ -2,18 +2,17 @@
 Модуль для работы с векторной базой данных Qdrant.
 """
 
-import structlog
 import asyncio
 from typing import Any
 
+import structlog
 from fastembed import SparseTextEmbedding
 from qdrant_client import AsyncQdrantClient, models
 
 from parser_db.config import settings
-from parser_db.profiler import profile_time
 from parser_db.embedder import NomicEmbedder
+from parser_db.profiler import profile_time
 from parser_db.schemas import DBChunk
-
 
 logger = structlog.get_logger(__name__)
 
@@ -256,7 +255,9 @@ class AsyncQdrantStore:
                 }
             )
 
-        logger.info("hybrid_search_executed", query=query, limit=limit, results=len(formatted_results))
+        logger.info(
+            "hybrid_search_executed", query=query, limit=limit, results=len(formatted_results)
+        )
         return formatted_results
 
 

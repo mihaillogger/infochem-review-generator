@@ -8,7 +8,6 @@ from sentence_transformers import SentenceTransformer
 from parser_db.config import settings
 from parser_db.profiler import profile_time
 
-
 logger = structlog.get_logger(__name__)
 
 

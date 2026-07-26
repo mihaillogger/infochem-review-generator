@@ -9,7 +9,6 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from parser_db.config import settings
 from parser_db.profiler import profile_time
 
-
 logger = structlog.get_logger(__name__)
 
 

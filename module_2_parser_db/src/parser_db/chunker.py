@@ -1,10 +1,10 @@
 """Модуль семантического чанкинга на основе подготовленных блоков текста."""
 
 import uuid
-import structlog
 from typing import Any, TypedDict
 
 import numpy as np
+import structlog
 
 from parser_db.config import settings
 from parser_db.embedder import NomicEmbedder
@@ -17,7 +17,6 @@ from parser_db.preprocessor import (
 )
 from parser_db.profiler import profile_time
 from parser_db.schemas import DBChunk, DBChunkMetadata, ParsedDocument
-
 
 logger = structlog.get_logger(__name__)
 

@@ -1,13 +1,13 @@
 """Модуль LLM-обогащения документа перед чанкингом."""
 
 import asyncio
+
 import structlog
 
 from parser_db.config import settings
 from parser_db.llm import AsyncGeminiClient
 from parser_db.profiler import profile_time
 from parser_db.schemas import Paragraph, ParsedDocument
-
 
 logger = structlog.get_logger(__name__)
 
