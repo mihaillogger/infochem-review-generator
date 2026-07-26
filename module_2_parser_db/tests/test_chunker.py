@@ -7,11 +7,12 @@ from parser_db.chunker import chunk_document
 from parser_db.schemas import Paragraph, ParsedDocument, Section
 
 
-@patch("parser_db.chunker.embedder")
-def test_chunker_section_paths(mock_embedder: MagicMock) -> None:
+@patch("parser_db.chunker.NomicEmbedder")
+def test_chunker_section_paths(mock_embedder_class: MagicMock) -> None:
     """Проверяет правильность формирования стека заголовков."""
-    # Мокаем эмбеддер, чтобы возвращал рандомные векторы
-    mock_embedder.encode_batch.return_value = np.random.rand(2, 768)
+    # Получаем инстанс, который вернет класс
+    mock_instance = mock_embedder_class.return_value
+    mock_instance.encode_batch.return_value = np.random.rand(2, 768)
 
     document = ParsedDocument(
         doi="10.123",
@@ -38,15 +39,16 @@ def test_chunker_section_paths(mock_embedder: MagicMock) -> None:
     assert chunks[1].metadata.section_path == "Methodology > Dataset"
 
 
-@patch("parser_db.chunker.embedder")
-def test_chunker_ema_split(mock_embedder: MagicMock) -> None:
+@patch("parser_db.chunker.NomicEmbedder")
+def test_chunker_ema_split(mock_embedder_class: MagicMock) -> None:
     """Проверяет разрыв чанка при резком падении косинусного сходства (EMA)."""
     # Симулируем 3 блока. 1 и 2 очень похожи, 3 - совершенно другой.
     vec1 = np.array([1.0, 0.0])
     vec2 = np.array([0.9, 0.1])  # sim(1,2) ~ 0.9
     vec3 = np.array([-1.0, 0.0])  # sim(2,3) ~ -0.9 (резкое падение)
 
-    mock_embedder.encode_batch.return_value = np.array([vec1, vec2, vec3])
+    mock_instance = mock_embedder_class.return_value
+    mock_instance.encode_batch.return_value = np.array([vec1, vec2, vec3])
 
     document = ParsedDocument(
         doi="10.123",

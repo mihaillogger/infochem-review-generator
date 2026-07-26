@@ -20,9 +20,6 @@ from parser_db.schemas import DBChunk, DBChunkMetadata, ParsedDocument
 
 logger = structlog.get_logger(__name__)
 
-# Инициализируем модель
-embedder = NomicEmbedder()
-
 
 class ChunkMeta(TypedDict):
     contains_table: bool
@@ -104,6 +101,8 @@ def chunk_document(document: ParsedDocument) -> list[DBChunk]:
         list[DBChunk]: Готовые чанки для загрузки в БД.
     """
     logger.info("chunking_started", doi=document.doi, sections_count=len(document.sections))
+
+    embedder = NomicEmbedder()
 
     chunks: list[DBChunk] = []
 

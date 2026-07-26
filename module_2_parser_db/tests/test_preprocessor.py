@@ -44,11 +44,12 @@ def test_split_recursively(mock_count_tokens: AsyncMock) -> None:
     text = "A" * 50 + "\n\n" + "B" * 50 + "\n\n" + "C" * 50
 
     # Лимит 60, значит куски по 50 должны разделиться
-    chunks = split_recursively(text, max_tokens=60)
+    chunks, is_broken = split_recursively(text, max_tokens=60)
 
     assert len(chunks) == 3
     assert chunks[0] == "A" * 50
     assert chunks[1] == "B" * 50
+    assert is_broken is False
 
 
 def test_extract_visual_ids() -> None:
