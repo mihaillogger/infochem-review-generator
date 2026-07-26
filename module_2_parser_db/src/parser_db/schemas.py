@@ -1,9 +1,10 @@
 """Pydantic-схемы для парсера научных статей."""
 
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from parser_db.config import settings
 
@@ -31,13 +32,25 @@ class Paragraph(BaseModel):
     )
 
 
+class StandardSection(StrEnum):
+    """Стандартизированные разделы научных статей для фильтрации."""
+
+    ABSTRACT = "Abstract"
+    INTRODUCTION = "Introduction"
+    CONCEPTS_AND_MECHANISMS = "Concepts & Mechanisms"
+    MATERIALS_AND_SYNTHESIS = "Materials & Synthesis"
+    APPLICATIONS = "Applications & Devices"
+    PERSPECTIVES_AND_CONCLUSIONS = "Perspectives & Conclusions"
+    UNKNOWN = "Unknown"
+
+
 class Section(BaseModel):
     """Логический раздел документа."""
 
     original_heading: str = Field(
         ..., description="Исходный текст заголовка из PDF (например, '3. Encapsulation')"
     )
-    macro_category: str = Field(
+    macro_category: StandardSection = Field(
         ..., description="Стандартизированный класс (например, 'Concepts & Mechanisms')"
     )
     level: int = Field(..., description="Уровень вложенности заголовка (1 - H1, 2 - H2)")
@@ -116,18 +129,6 @@ class DBChunk(BaseModel):
     metadata: DBChunkMetadata
 
 
-class StandardSection(StrEnum):
-    """Стандартизированные разделы научных статей для фильтрации."""
-
-    ABSTRACT = "Abstract"
-    INTRODUCTION = "Introduction"
-    CONCEPTS_AND_MECHANISMS = "Concepts & Mechanisms"
-    MATERIALS_AND_SYNTHESIS = "Materials & Synthesis"
-    APPLICATIONS = "Applications & Devices"
-    PERSPECTIVES_AND_CONCLUSIONS = "Perspectives & Conclusions"
-    UNKNOWN = "Unknown"
-
-
 class SearchRequest(BaseModel):
     """Схема запроса для поиска фактов LLM-агентом."""
 
@@ -171,6 +172,29 @@ class IngestRequest(BaseModel):
     file_paths: list[str] = Field(
         ..., description="Список абсолютных путей к скачанным PDF в томе /data/pdfs/."
     )
+
+    @field_validator("file_paths")
+    @classmethod
+    def validate_paths(cls, v: list[str]) -> list[str]:
+        """Проверяет пути на наличие Directory Traversal уязвимости.
+
+        Args:
+            v (list[str]): Исходный список путей.
+
+        Returns:
+            list[str]: Очищенный и проверенный список абсолютных путей.
+
+        Raises:
+            ValueError: Если путь пытается выйти за пределы разрешенной директории.
+        """
+        safe_root = Path(settings.SHARED_DATA_ROOT).resolve()
+        validated = []
+        for p in v:
+            resolved = Path(p).resolve()
+            if not resolved.is_relative_to(safe_root):
+                raise ValueError(f"Путь {p} выходит за пределы защищенной директории.")
+            validated.append(str(resolved))
+        return validated
 
 
 class IngestResponse(BaseModel):
