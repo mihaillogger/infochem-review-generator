@@ -1,7 +1,7 @@
 """Модуль для извлечения данных MinerU и преобразования их в схемы."""
 
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from markdownify import markdownify as md
@@ -10,7 +10,7 @@ from parser_db.equations import validate_latex
 from parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
 
 
-class SectionType(str, Enum):
+class SectionType(StrEnum):
     """Перечисление стандартизированных разделов для химических review-статей."""
     
     ABSTRACT = "Abstract"
@@ -68,16 +68,23 @@ def normalize_section_name(heading: str) -> SectionType:
     if "intro" in h_lower or "background" in h_lower:
         return SectionType.INTRODUCTION
         
-    if any(x in h_lower for x in ["concept", "mechanism", "principle", "theory", "interaction", "behavior"]):
+    concepts_kw = ["concept", "mechanism", "principle", "theory", "interaction", "behavior"]
+    if any(x in h_lower for x in concepts_kw):
         return SectionType.CONCEPTS_AND_MECHANISMS
         
-    if any(x in h_lower for x in ["material", "synthesis", "fabrication", "preparation", "structure", "composite", "hybrid", "nanostructuring", "route"]):
+    materials_kw = [
+        "material", "synthesis", "fabrication", "preparation", 
+        "structure", "composite", "hybrid", "nanostructuring", "route"
+    ]
+    if any(x in h_lower for x in materials_kw):
         return SectionType.MATERIALS_AND_SYNTHESIS
         
-    if any(x in h_lower for x in ["application", "device", "delivery", "therapy", "sensor", "patterning", "coating"]):
+    apps_kw = ["application", "device", "delivery", "therapy", "sensor", "patterning", "coating"]
+    if any(x in h_lower for x in apps_kw):
         return SectionType.APPLICATIONS
         
-    if any(x in h_lower for x in ["conclus", "summary", "prospect", "perspective", "future", "outlook"]):
+    conclusions_kw = ["conclus", "summary", "prospect", "perspective", "future", "outlook"]
+    if any(x in h_lower for x in conclusions_kw):
         return SectionType.PERSPECTIVES_AND_CONCLUSIONS
         
     return SectionType.UNKNOWN

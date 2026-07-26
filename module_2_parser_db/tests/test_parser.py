@@ -41,10 +41,24 @@ def test_is_smiles() -> None:
 def test_normalize_section_name() -> None:
     """Проверяет маппинг заголовков обзорных статей к строгому Enum SectionType."""
     assert normalize_section_name("1. Introduction") == SectionType.INTRODUCTION
-    assert normalize_section_name("Reaction Mechanisms and Theory") == SectionType.CONCEPTS_AND_MECHANISMS
-    assert normalize_section_name("Nanomaterial Synthesis") == SectionType.MATERIALS_AND_SYNTHESIS
+    
+    assert (
+        normalize_section_name("Reaction Mechanisms and Theory") 
+        == SectionType.CONCEPTS_AND_MECHANISMS
+    )
+    
+    assert (
+        normalize_section_name("Nanomaterial Synthesis") 
+        == SectionType.MATERIALS_AND_SYNTHESIS
+    )
+    
     assert normalize_section_name("Clinical Applications") == SectionType.APPLICATIONS
-    assert normalize_section_name("Future Perspectives") == SectionType.PERSPECTIVES_AND_CONCLUSIONS
+    
+    assert (
+        normalize_section_name("Future Perspectives") 
+        == SectionType.PERSPECTIVES_AND_CONCLUSIONS
+    )
+    
     assert normalize_section_name("Custom Header") == SectionType.UNKNOWN
 
 
