@@ -1,8 +1,42 @@
 import re
 from typing import Dict, Any, List
 from langchain_google_genai import ChatGoogleGenerativeAI
-from state import GraphState, PlanOutput, SectionState, WriterOutput
+from src.agents.state import GraphState, PlanOutput, SectionState, WriterOutput
+import requests
+from typing import List
 
+
+def get_database_topology(topic: str) -> List[str]:
+    """
+    Делает гибридный поиск по базе Матвея и собирает уникальные пути (section_path).
+    """
+    url = "LINK/api/v1/search"
+
+    payload = {
+        "query": topic,
+        "limit": 10000
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+
+        response_data = response.json()
+        chunks = response_data.get("data", [])
+
+        unique_paths = set()
+        for chunk in chunks:
+            metadata = chunk.get("metadata", {})
+            section_path = metadata.get("section_path")
+
+            if section_path and isinstance(section_path, str):
+                unique_paths.add(section_path)
+
+        return list(unique_paths)
+
+    except Exception as e:
+        print(f"ВНИМАНИЕ: Ошибка при запросе к API Матвея: {e}")
+        return []
 
 def build_markdown_tree(paths: List[str]) -> str:
     """Превращает список путей section_path в Markdown-дерево."""
@@ -59,44 +93,47 @@ def _group_vancouver_numbers(numbers: List[int]) -> str:
 
 def planner_node(state: GraphState) -> Dict[str, Any]:
     """Узел 1: Строит план на основе метаданных базы."""
-    # ЗАГЛУШКА МЕТА-АДАПТЕРА: Здесь дергаем метод Матвея get_database_topology()
-    raw_paths_from_db = [
-        "Abstract",
-        "Introduction > Background > Catalytic mechanisms",
-        "Introduction > Background > History",
-        "Results > Experiment 1 > Yield analysis",
-        "Conclusions"
-    ]
+
+    topic = state["global_topic"]
+
+    raw_paths_from_db = get_database_topology(topic)
+
+    if not raw_paths_from_db:
+        raise ValueError("База вернула пустой список путей. Проверьте API или топик.")
 
     content_tree = build_markdown_tree(raw_paths_from_db)
 
     llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite", temperature=0.0)
     structured_llm = llm.with_structured_output(PlanOutput)
 
-    system_prompt = """
+    system_prompt = f"""
     Ты — ведущий научный редактор журнала Chemical Reviews. 
-    Твоя задача: спроектировать структуру монументального научного обзора (Review Article) на основе предоставленного Дерева Контента.
-
+    Твоя задача: спроектировать структуру монументального научного обзора (Review Article) на тему "{topic}" на основе предоставленного Дерева Контента.
+    
     ОБЯЗАТЕЛЬНАЯ АРХИТЕКТУРА CHEMICAL REVIEWS:
-    1. Abstract (Краткая выжимка обзора).
-    2. Introduction (Исторический контекст, актуальность, цели обзора).
-    3. Основные тематические разделы (Глубоко структурированные, нумерация 2, 3, 4 с подразделами 2.1, 2.2, 2.2.1 и т.д.). ЗАПРЕЩЕНО использовать стандартные заголовки вроде "Methods" или "Results". Названия должны отражать суть химических процессов/материалов.
-    4. Summary and Outlook (Заключение и перспективы развития области).
-    5. Data Availability Statement (если применимо к теме).
-
+    1. Abstract.
+    2. Introduction.
+    3. Основные тематические разделы (Глубоко структурированные, нумерация 2, 3, 4 с подразделами 2.1, 2.2, 2.2.1 и т.д.). ЗАПРЕЩЕНО использовать стандартные заголовки вроде "Methods" или "Results". Названия должны отражать суть химических процессов/материалов в контексте темы "{topic}".
+    4. Summary and Outlook.
+    5. Data Availability Statement (если применимо).
+    
     ПРАВИЛА ПРОЕКТИРОВАНИЯ (АГЕНТСКИЕ ОГРАНИЧЕНИЯ):
-    - ZERO HALLUCINATION: Запрещено выдумывать разделы, для которых нет данных в Дереве Контента. План должен быть на 100% data-driven.
-    - GRANULARITY: Разбивай обширные темы на подразделы (1000-1500 слов на узел), чтобы writer_node мог глубоко раскрыть тему, не теряя контекст.
-    - MAPPING: Каждая секция плана ДОЛЖНА содержать список `target_paths` — точных путей из Дерева Контента, которые покрывают эту тему. Это необходимо для последующего извлечения данных (retrieval).
-
+    - ZERO HALLUCINATION: Запрещено выдумывать разделы, для которых нет данных в Дереве Контента.
+    - MAXIMAL COVERAGE: Ты обязан интегрировать МАКСИМАЛЬНОЕ количество релевантных узлов из Дерева Контента. Не оставляй целые статьи или крупные ветки без внимания, если они косвенно или прямо связаны с темой "{topic}".
+    - CROSS-REFERENCING: Каждая крупная секция плана в идеале должна объединять `target_paths` из РАЗНЫХ статей (источников), если они пересекаются по смыслу (например, механизмы инкапсуляции и методы доставки). Избегай создания секций, опирающихся только на одну статью.
+    - GRANULARITY: Разбивай обширные темы на подразделы (1000-1500 слов на узел), чтобы writer_node мог глубоко раскрыть тему.
+    - MAPPING: Каждая секция плана ДОЛЖНА содержать список `target_paths` — точных путей из Дерева Контента.
+    - COPY-PASTE ONLY: Ты ДОЛЖЕН копировать target_paths символ в символ из предоставленного Дерева Контента. Категорически запрещено перефразировать, изменять регистр или выдумывать пути, которых нет во входных данных.
+    
     АЛГОРИТМ РАБОТЫ (CHAIN OF THOUGHT):
-    1. Проанализируй Дерево Контента и выяви основные смысловые кластеры.
-    2. Сопоставь эти кластеры с архитектурой Chemical Reviews.
-    3. Выстрой логическую последовательность от базовых концепций к сложным применениям.
-    4. Сгенерируй финальный JSON, строго следуя Pydantic-схеме.
+    1. Проведи аудит Дерева Контента: перечисли для себя все предоставленные источники (статьи) и выдели их главные темы.
+    2. Сформируй междисциплинарные кластеры, которые объединяют данные из разных источников (например, методы синтеза + их применение).
+    3. Проверь "Слепые зоны": убедись, что ни один крупный раздел Дерева (например, "Self-Healing" или "LbL") не был забыт, если он связан с темой.
+    4. Выстрой логическую последовательность разделов от базовых концепций к сложным применениям.
+    5. Сгенерируй финальный JSON, строго следуя Pydantic-схеме.
     """
 
-    user_prompt = f"Тема: {state['global_topic']}\n\nДЕРЕВО ДОСТУПНОГО КОНТЕНТА:\n{content_tree}"
+    user_prompt = f"Тема обзора: {topic}\n\nДЕРЕВО ДОСТУПНОГО КОНТЕНТА:\n{content_tree}"
 
     result = structured_llm.invoke([
         ("system", system_prompt),
@@ -125,12 +162,12 @@ def planner_node(state: GraphState) -> Dict[str, Any]:
 
 def external_writer_node(state: GraphState) -> Dict[str, Any]:
     """
-    Узел 2: Делегирование Матвею (Adapter + Writer).
+    Узел 2: Adapter + Writer.
     Граф отправляет запрос и валидирует ответ по контракту WriterOutput.
     """
     current = state["current_section"]
 
-    # === ИМИТАЦИЯ ВЫЗОВА API МАТВЕЯ ===
+    # === ИМИТАЦИЯ ВЫЗОВА API ===
 
     raw_response = {
         "section_title": current["title"],
