@@ -2,9 +2,7 @@ import os
 import config
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
-# ... остальной код без изменений ...
 
-# 1. Задаем жесткую структуру ответа (Схема Pydantic)
 class RelevanceScore(BaseModel):
     is_relevant: bool = Field(
         description="True, если текст содержит прямой и точный ответ на запрос. False, если это вода или не по теме."
@@ -14,19 +12,14 @@ class RelevanceScore(BaseModel):
     )
 
 def check_relevance(query: str, chunk: str) -> dict:
-    """
-    Бинарный классификатор релевантности текста.
-    """
-    # 2. Инициализируем модель (температура 0.0 для жесткой логики)
+    #температура 0 для строгости
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.5-flash-lite",
         temperature=0.0
     )
 
-    # 3. Привязываем схему к модели
     structured_llm = llm.with_structured_output(RelevanceScore)
 
-    # 4. Собираем системный промпт
     prompt = f"""
     Ты — строгий академический фильтр данных (Validator). Твоя задача — оценить, содержит ли предоставленный фрагмент текста конкретную информацию для ответа на запрос.
     
@@ -41,10 +34,8 @@ def check_relevance(query: str, chunk: str) -> dict:
     Если текст содержит только общие слова, введения, нерелевантную информацию или не отвечает на суть запроса — верни False и укажи причину отказа.
     """
 
-    # 5. Вызываем модель
     result = structured_llm.invoke(prompt)
     
-    # 6. Упаковываем в обычный словарь (API-контракт)
     return {
         "is_relevant": result.is_relevant,
         "reason": result.reason

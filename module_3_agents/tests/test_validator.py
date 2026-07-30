@@ -1,18 +1,14 @@
 import sys
 import os
-
-# 1. Вычисляем путь к папке, где лежит этот файл, и поднимаемся на один уровень вверх
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 
-# 2. Жестко добавляем родительскую папку в начало поиска Питона
 sys.path.insert(0, parent_dir)
 
 import pytest
 import src.agents.config
 from validator import check_relevance
 
-# Проверяем, что ключ есть в системе, иначе тесты упадут до старта
 @pytest.fixture(autouse=True)
 def check_env():
     if "GOOGLE_API_KEY" not in os.environ:
