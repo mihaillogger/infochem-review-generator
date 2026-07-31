@@ -8,9 +8,10 @@ from typing import Any
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from PIL import Image
+from thefuzz import fuzz
+
 from parser_db.equations import validate_latex
 from parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
-from thefuzz import fuzz
 
 
 class SectionType(StrEnum):
