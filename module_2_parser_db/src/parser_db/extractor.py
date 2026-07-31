@@ -34,7 +34,7 @@ def optimize_table_markup(html_markup: str) -> str:
     soup = BeautifulSoup(html_markup, "html.parser")
     for tag in soup(["a", "img", "div", "span"]):
         tag.unwrap()
-    
+
     for tag in soup.find_all(True):
         attrs = dict(tag.attrs)
         for attr in attrs:
@@ -52,18 +52,39 @@ def normalize_section_name(heading: str) -> SectionType:
         SectionType.ABSTRACT: ["abstract", "background"],
         SectionType.INTRODUCTION: ["introduction", "intro"],
         SectionType.CONCEPTS_AND_MECHANISMS: [
-            "concept", "mechanism", "principle", "theory", "interaction", "behavior"
+            "concept",
+            "mechanism",
+            "principle",
+            "theory",
+            "interaction",
+            "behavior",
         ],
         SectionType.MATERIALS_AND_SYNTHESIS: [
-            "material", "synthesis", "fabrication", "preparation", 
-            "structure", "composite", "route", "experimental"
+            "material",
+            "synthesis",
+            "fabrication",
+            "preparation",
+            "structure",
+            "composite",
+            "route",
+            "experimental",
         ],
         SectionType.APPLICATIONS: [
-            "application", "device", "delivery", "therapy", "sensor", "patterning"
+            "application",
+            "device",
+            "delivery",
+            "therapy",
+            "sensor",
+            "patterning",
         ],
         SectionType.PERSPECTIVES_AND_CONCLUSIONS: [
-            "conclusion", "summary", "prospect", "perspective", "future", "outlook"
-        ]
+            "conclusion",
+            "summary",
+            "prospect",
+            "perspective",
+            "future",
+            "outlook",
+        ],
     }
 
     best_match = SectionType.UNKNOWN
@@ -103,7 +124,7 @@ def is_table_broken(html_markup: str) -> bool:
 
     soup = BeautifulSoup(html_markup, "html.parser")
     clean_text = soup.get_text(separator=" ")
-    
+
     for w in clean_text.split():
         if len(w) > 35 and "http" not in w and not is_smiles(w):
             return True
@@ -121,11 +142,11 @@ def is_table_broken(html_markup: str) -> bool:
 def clean_text_lite(text: str) -> str:
     """Очищает текст от базовых артефактов MinerU без потери химических формул."""
     text = text.replace("\u0001", "°").replace("\u0003", "-")
-    
+
     # Удаляем строго HTML-теги (начинаются с буквы или /), игнорируя математику типа A < B > C
     if "<" in text and ">" in text:
         text = re.sub(r"</?[a-zA-Z][^>]*>", "", text)
-        
+
     text = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -182,7 +203,7 @@ def stitch_visuals(paths: list[str], bboxes: list[list[float]], out_path: str) -
     for path, bbox in filtered_data:
         with Image.open(path) as img:
             canvas.paste(img, (int(bbox[0] - min_x), int(bbox[1] - min_y)))
-            
+
     abs_out = os.path.abspath(out_path)
     canvas.save(abs_out)
     return abs_out
@@ -210,10 +231,10 @@ def build_parsed_document(
         nonlocal vis_buffer_paths, vis_buffer_bboxes, current_main_caption, current_visual_id
         if not vis_buffer_paths:
             return
-            
+
         exact_id = current_visual_id or f"Vis_{len(visuals)}"
         out_path = f"stitched_{exact_id.replace(' ', '_')}.png"
-        
+
         final_path = stitch_visuals(vis_buffer_paths, vis_buffer_bboxes, out_path)
         if not final_path:
             final_path = os.path.abspath(vis_buffer_paths[0])
@@ -297,7 +318,7 @@ def build_parsed_document(
 
             raw_caption = block.get("table_caption", [])
             caption = " ".join(raw_caption).strip() if raw_caption else ""
-            
+
             img_path = block.get("img_path", "")
             if img_path:
                 img_path = os.path.abspath(img_path)
@@ -340,5 +361,5 @@ def build_parsed_document(
         journal=metadata.get("journal"),
         abstract=metadata.get("abstract"),
         sections=sections,
-        visuals=visuals
+        visuals=visuals,
     )

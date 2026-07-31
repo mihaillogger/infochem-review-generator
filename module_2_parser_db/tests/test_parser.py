@@ -47,8 +47,7 @@ def test_normalize_section_name() -> None:
         == SectionType.CONCEPTS_AND_MECHANISMS
     )
     assert (
-        normalize_section_name("II. Nanomaterial Synthesis") 
-        == SectionType.MATERIALS_AND_SYNTHESIS
+        normalize_section_name("II. Nanomaterial Synthesis") == SectionType.MATERIALS_AND_SYNTHESIS
     )
     assert normalize_section_name("Clinical Applications") == SectionType.APPLICATIONS
     assert normalize_section_name("Future Perspectives") == SectionType.PERSPECTIVES_AND_CONCLUSIONS
@@ -99,7 +98,7 @@ def test_build_parsed_document_structure() -> None:
         "authors": ["Ivanov I.I.", "Petrov P.P."],
         "year": 2026,
         "journal": "Nature Chemistry",
-        "abstract": "Test abstract text"
+        "abstract": "Test abstract text",
     }
 
     doc = build_parsed_document(mock_mineru_data, metadata=mock_metadata)
@@ -110,7 +109,7 @@ def test_build_parsed_document_structure() -> None:
     assert doc.title == "Test Review Paper"
     assert len(doc.authors) == 2
     assert doc.year == 2026
-    
+
     # Проверка парсинга секций
     assert len(doc.sections) == 1
     assert doc.sections[0].original_heading == "1. Introduction"
@@ -122,9 +121,9 @@ def test_build_parsed_document_structure() -> None:
     broken_math_paragraph = doc.sections[0].paragraphs[1]
     assert broken_math_paragraph.is_broken is True
     assert broken_math_paragraph.image_fallback_path is not None
-    
+
     # Убеждаемся, что экстрактор реально обернул путь в абсолютный для БД Ромчика
     assert os.path.isabs(broken_math_paragraph.image_fallback_path) is True
-    
+
     expected_path = os.path.normpath("img/broken_math.png")
     assert broken_math_paragraph.image_fallback_path.endswith(expected_path)
