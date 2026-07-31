@@ -6,14 +6,14 @@ from pylatexenc.latexwalker import LatexWalker, LatexWalkerError  # type: ignore
 def validate_latex(latex_str: str) -> bool:
     """Проверяет синтаксическую корректность LaTeX-формулы.
 
-    Использует AST-парсер для точной проверки баланса окружений,
-    математических блоков и корректности экранирования.
-Ц
-    Args:
-        latex_str: Строка с формулой.
+        Использует AST-парсер для точной проверки баланса окружений,
+        математических блоков и корректности экранирования.
+    Ц
+        Args:
+            latex_str: Строка с формулой.
 
-    Returns:
-        True, если синтаксис формулы корректен, иначе False.
+        Returns:
+            True, если синтаксис формулы корректен, иначе False.
     """
     if not latex_str or len(latex_str.strip()) < 4:
         return False
