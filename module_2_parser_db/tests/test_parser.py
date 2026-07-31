@@ -127,4 +127,4 @@ def test_build_parsed_document_structure() -> None:
     assert os.path.isabs(broken_math_paragraph.image_fallback_path) is True
     
     expected_path = os.path.normpath("img/broken_math.png")
-    assert broken_math_paragraph.image_fallback_path.endswith(expected_path).endswith(os.path.normpath("img/broken_math.png"))
+    assert broken_math_paragraph.image_fallback_path.endswith(expected_path)
