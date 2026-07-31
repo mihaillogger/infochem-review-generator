@@ -8,8 +8,8 @@ from typing import Any
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from PIL import Image
-from src.parser_db.equations import validate_latex
-from src.parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
+from parser_db.equations import validate_latex
+from parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
 from thefuzz import fuzz
 
 
