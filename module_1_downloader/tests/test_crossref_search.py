@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
+from typing import Any, cast
 
+import httpx
 import pytest
 from downloader import crossref_search as cs
 
@@ -158,3 +160,80 @@ def test_search_skips_works_without_doi(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_search_empty_keywords() -> None:
     assert cs.search([]) == {}
+
+
+# ── _get_with_retry (мок httpx.Client) ────────────────────────────
+
+
+class _FakeResp:
+    """Ответ httpx с нужным минимумом: код, raise_for_status, json."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        self.request = httpx.Request("GET", cs.CROSSREF_URL)
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{self.status_code}", request=self.request, response=cast(httpx.Response, self)
+            )
+
+    def json(self) -> dict[str, Any]:
+        return {"message": {"items": []}}
+
+
+class _FakeClient:
+    """Отдаёт заготовленную последовательность кодов/исключений на каждый get."""
+
+    def __init__(self, seq: list[int | Exception]) -> None:
+        self.seq = seq
+        self.calls = 0
+
+    def get(self, url: str, *, params: Any, timeout: float) -> _FakeResp:
+        item = self.seq[self.calls]
+        self.calls += 1
+        if isinstance(item, Exception):
+            raise item
+        return _FakeResp(item)
+
+
+def _run_retry(seq: list[int | Exception]) -> tuple[Any, _FakeClient]:
+    client = _FakeClient(seq)
+    resp = cs._get_with_retry(cast(httpx.Client, client), {})
+    return resp, client
+
+
+def test_crossref_retry_success_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    _resp, client = _run_retry([200])
+    assert client.calls == 1
+
+
+def test_crossref_retry_recovers_after_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    _resp, client = _run_retry([502, 200])
+    assert client.calls == 2
+
+
+def test_crossref_retry_recovers_after_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    err = httpx.ConnectTimeout("boom")
+    _resp, client = _run_retry([err, 200])
+    assert client.calls == 2
+
+
+def test_crossref_retry_fatal_4xx_no_repeat(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 404 не входит в RETRIABLE_STATUS — бросаем сразу, без повторов.
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    client = _FakeClient([404])
+    with pytest.raises(httpx.HTTPStatusError):
+        cs._get_with_retry(cast(httpx.Client, client), {})
+    assert client.calls == 1
+
+
+def test_crossref_retry_exhausts_and_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    client = _FakeClient([502] * cs.SEARCH_RETRY_ATTEMPTS)
+    with pytest.raises(httpx.HTTPStatusError):
+        cs._get_with_retry(cast(httpx.Client, client), {})
+    assert client.calls == cs.SEARCH_RETRY_ATTEMPTS
