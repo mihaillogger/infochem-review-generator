@@ -1,6 +1,6 @@
 """Модуль для валидации математических формул (LaTeX)."""
 
-from pylatexenc.latexwalker import LatexWalker, LatexWalkerError  # type: ignores
+from pylatexenc.latexwalker import LatexWalker, LatexWalkerError  # type: ignore
 
 
 def validate_latex(latex_str: str) -> bool:
@@ -8,7 +8,7 @@ def validate_latex(latex_str: str) -> bool:
 
     Использует AST-парсер для точной проверки баланса окружений,
     математических блоков и корректности экранирования.
-
+Ц
     Args:
         latex_str: Строка с формулой.
 
