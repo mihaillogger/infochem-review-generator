@@ -3,8 +3,8 @@
 import os
 from typing import Any
 
-from src.parser_db.equations import validate_latex
-from src.parser_db.extractor import (
+from parser_db.equations import validate_latex
+from parser_db.extractor import (
     SectionType,
     build_parsed_document,
     extract_exact_visual_id,
@@ -13,7 +13,7 @@ from src.parser_db.extractor import (
     normalize_section_name,
     optimize_table_markup,
 )
-from src.parser_db.schemas import ParsedDocument
+from parser_db.schemas import ParsedDocument
 
 
 def test_validate_latex_balanced() -> None:

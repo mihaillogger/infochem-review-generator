@@ -1,6 +1,6 @@
 """Модуль для валидации математических формул (LaTeX)."""
 
-from pylatexenc.latexwalker import LatexWalker, LatexWalkerError
+from pylatexenc.latexwalker import LatexWalker, LatexWalkerError  # type: ignores
 
 
 def validate_latex(latex_str: str) -> bool:
