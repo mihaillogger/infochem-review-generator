@@ -102,6 +102,7 @@ def test_to_metadata_full_record() -> None:
         "author": [{"given": "A", "family": "B"}],
         "issued": {"date-parts": [[2021]]},
         "container-title": ["Journal X"],
+        "abstract": "<jats:p>We did science.</jats:p>",
     }
     rec = cs._to_metadata(work, "kw1")
     assert rec == {
@@ -110,10 +111,27 @@ def test_to_metadata_full_record() -> None:
         "authors": ["A B"],
         "year": 2021,
         "journal": "Journal X",
+        "abstract": "We did science.",
         "matched_keywords": ["kw1"],
         "download_status": "pending",
         "source": None,
     }
+
+
+# ── _clean_abstract ───────────────────────────────────────────────
+
+
+def test_clean_abstract_strips_jats_tags() -> None:
+    raw = "<jats:title>Abstract</jats:title><jats:p>We split water with light.</jats:p>"
+    assert cs._clean_abstract(raw) == "We split water with light."
+
+
+def test_clean_abstract_none_when_missing() -> None:
+    assert cs._clean_abstract(None) is None
+
+
+def test_clean_abstract_collapses_whitespace() -> None:
+    assert cs._clean_abstract("<jats:p>a\n\n  b   c</jats:p>") == "a b c"
 
 
 def test_to_metadata_missing_title_and_journal() -> None:

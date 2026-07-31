@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 import statistics
 import time
 from typing import Any, cast
@@ -59,7 +60,7 @@ def _search_pool(
     params: dict[str, str | int] = {
         "query.bibliographic": keyword,
         "filter": _build_filters(from_year, until_year),
-        "select": "DOI,title,author,issued,container-title,score",
+        "select": "DOI,title,author,issued,container-title,abstract,score",
         "sort": "score",
         "order": "desc",
         "rows": POOL,
@@ -131,6 +132,20 @@ def _extract_year(work: dict[str, Any]) -> int | None:
     return parts[0][0] if parts and parts[0] else None
 
 
+def _clean_abstract(raw: str | None) -> str | None:
+    """Абстракт CrossRef приходит с JATS-тегами (<jats:p>…). Чистим до текста.
+
+    Не у всех статей он есть — тогда вернём None. Ведущее слово «Abstract»
+    (часто идёт из <jats:title>) убираем, чтобы не дублировалось в тексте.
+    """
+    if not raw:
+        return None
+    text = re.sub(r"<[^>]+>", " ", raw)  # выкинуть все теги
+    text = re.sub(r"\s+", " ", text).strip()  # схлопнуть пробелы
+    text = re.sub(r"^abstract\s*", "", text, flags=re.IGNORECASE)
+    return text or None
+
+
 def _to_metadata(work: dict[str, Any], keyword: str) -> dict[str, Any]:
     """Одна работа CrossRef -> запись контракта metadata.json."""
     return {
@@ -139,6 +154,7 @@ def _to_metadata(work: dict[str, Any], keyword: str) -> dict[str, Any]:
         "authors": _extract_authors(work),
         "year": _extract_year(work),
         "journal": (work.get("container-title") or [None])[0],
+        "abstract": _clean_abstract(work.get("abstract")),  # для Модуля 3, может быть None
         "matched_keywords": [keyword],  # по каким темам статья найдена
         "download_status": "pending",  # pending -> ok / not_found / error
         "source": None,  # чем скачано (заполнит качалка)
