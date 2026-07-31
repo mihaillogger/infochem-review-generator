@@ -8,10 +8,9 @@ from typing import Any
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from PIL import Image
-from thefuzz import fuzz
-
 from src.parser_db.equations import validate_latex
 from src.parser_db.schemas import Paragraph, ParsedDocument, Section, VisualMeta
+from thefuzz import fuzz
 
 
 class SectionType(StrEnum):
@@ -298,7 +297,6 @@ def build_parsed_document(
 
             raw_caption = block.get("table_caption", [])
             caption = " ".join(raw_caption).strip() if raw_caption else ""
-            exact_id = extract_exact_visual_id(caption, f"Table_{len(visuals)}")
             
             img_path = block.get("img_path", "")
             if img_path:

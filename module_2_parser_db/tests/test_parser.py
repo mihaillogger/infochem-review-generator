@@ -46,7 +46,10 @@ def test_normalize_section_name() -> None:
         normalize_section_name("1.2.4 Reaction Mechanisms and Theory")
         == SectionType.CONCEPTS_AND_MECHANISMS
     )
-    assert normalize_section_name("II. Nanomaterial Synthesis") == SectionType.MATERIALS_AND_SYNTHESIS
+    assert (
+        normalize_section_name("II. Nanomaterial Synthesis") 
+        == SectionType.MATERIALS_AND_SYNTHESIS
+    )
     assert normalize_section_name("Clinical Applications") == SectionType.APPLICATIONS
     assert normalize_section_name("Future Perspectives") == SectionType.PERSPECTIVES_AND_CONCLUSIONS
     # Проверка работы thefuzz для нестандартных заголовков
@@ -122,4 +125,6 @@ def test_build_parsed_document_structure() -> None:
     
     # Убеждаемся, что экстрактор реально обернул путь в абсолютный для БД Ромчика
     assert os.path.isabs(broken_math_paragraph.image_fallback_path) is True
-    assert broken_math_paragraph.image_fallback_path.endswith(os.path.normpath("img/broken_math.png"))
+    
+    expected_path = os.path.normpath("img/broken_math.png")
+    assert broken_math_paragraph.image_fallback_path.endswith(expected_path).endswith(os.path.normpath("img/broken_math.png"))
