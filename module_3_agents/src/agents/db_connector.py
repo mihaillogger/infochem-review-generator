@@ -1,38 +1,27 @@
 import requests
 import config
+from typing import List, Dict
 
-def search_chunks(query: str, limit: int = 3) -> list[str]:
-    payload = {
-        "query": query,
-        "limit": limit
-    }
-    
+
+def fetch_chunks(query: str, target_paths: List[str] = None, limit: int = 50) -> List[Dict]:
+    payload = {"query": query, "limit": limit}
+
     try:
-        response = requests.post(config.FASTAPI_ENDPOINT, json=payload, timeout=10)
+        response = requests.post(config.DB_API_URL, json=payload, timeout=30)
         response.raise_for_status()
-        
-        # По контракту API возвращает список словарей: [{"text": "...", "doi": "...", ...}]
-        results = response.json()
-        
-        chunks = [item.get("text", "") for item in results if item.get("text")]
-        
-        if not chunks:
-            print(f"[WARNING] База вернула пустой список для запроса: '{query}'")
-            
-        return chunks
+        chunks = response.json().get("data", [])
 
-    except requests.exceptions.Timeout:
-        print(f"[ERROR] Сервер БД не ответил за 10 секунд (Timeout). Запрос: '{query}'")
-        return []
-        
-    except requests.exceptions.ConnectionError:
-        print(f"[ERROR] Не удалось подключиться к базе по адресу: {config.FASTAPI_ENDPOINT}. Сервер запущен?")
-        return []
-        
-    except requests.exceptions.HTTPError as e:
-        print(f"[ERROR] Сервер БД вернул ошибку ({response.status_code}): {e}")
-        return []
-        
+        results = []
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            if not text:
+                continue
+
+            chunk_id = chunk.get("chunk_id")
+
+            results.append({"id": str(chunk_id), "text": text})
+
+        return results
     except Exception as e:
-        print(f"[ERROR] Неизвестная ошибка при запросе к БД: {e}")
+        print(f"[ERROR] Ошибка БД: {e}")
         return []

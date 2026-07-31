@@ -1,109 +1,80 @@
 import re
-from typing import Dict, Any, List
-from langchain_google_genai import ChatGoogleGenerativeAI
-from src.agents.state import GraphState, PlanOutput, SectionState, WriterOutput
 import requests
-from typing import List
+import time
+from typing import Dict, Any
+from langchain_google_genai import ChatGoogleGenerativeAI
+from concurrent.futures import ThreadPoolExecutor
+
+import config
+from state import GraphState, PlanOutput, SectionState
+from adapter import generate_search_query
+import db_connector
+from writer import generate_section_draft
+from validator import check_relevance_batch
 
 
-def get_database_topology(topic: str) -> List[str]:
-    """
-    Делает гибридный поиск по базе Матвея и собирает уникальные пути (section_path).
-    """
-    url = "https://f82252bcf0168258-77-234-216-36.serveousercontent.com/api/v1/search"
+def generate_short_summary(content: str) -> str:
+    """Делает короткую выжимку текста для передачи в следующие узлы."""
+    if not content or "[Секция не сгенерирована" in content:
+        return "Секция пропущена или пуста."
 
-    payload = {
-        "query": topic,
-        "limit": 10000
-    }
+    llm = ChatGoogleGenerativeAI(model=config.LLM_MODEL)
+    prompt = f"Сделай ультра-короткую выжимку (3-4 предложения) главных научных фактов из этого текста. Без вводных слов.\n\nТЕКСТ:\n{content}"
+    return llm.invoke(prompt).content
 
+
+def get_database_topology(topic: str) -> list[str]:
+    payload = {"query": topic, "limit": 10000}
     try:
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-
-        response_data = response.json()
-        chunks = response_data.get("data", [])
-
-        unique_paths = set()
-        for chunk in chunks:
-            metadata = chunk.get("metadata", {})
-            section_path = metadata.get("section_path")
-
-            if section_path and isinstance(section_path, str):
-                unique_paths.add(section_path)
-
-        return list(unique_paths)
-
-    except Exception as e:
-        print(f"ВНИМАНИЕ: Ошибка при запросе к API Матвея: {e}")
+        response = requests.post(config.DB_API_URL, json=payload, timeout=30)
+        chunks = response.json().get("data", [])
+        return list(
+            {c.get("metadata", {}).get("section_path") for c in chunks if c.get("metadata", {}).get("section_path")})
+    except:
         return []
 
-def build_markdown_tree(paths: List[str]) -> str:
-    """Превращает список путей section_path в Markdown-дерево."""
+
+def build_markdown_tree(paths: list[str]) -> str:
     tree = {}
     for path in paths:
         parts = [p.strip() for p in path.split('>')]
-        current_level = tree
+        curr = tree
         for part in parts:
-            if part not in current_level:
-                current_level[part] = {}
-            current_level = current_level[part]
+            if part not in curr: curr[part] = {}
+            curr = curr[part]
 
-    def _render_tree(node, depth=0):
-        result = ""
-        for key, child in node.items():
-            result += "  " * depth + f"- {key}\n"
-            result += _render_tree(child, depth + 1)
-        return result
+    def render(node, d=0):
+        res = ""
+        for k, v in node.items():
+            res += "  " * d + f"- {k}\n" + render(v, d + 1)
+        return res
 
-    return _render_tree(tree)
+    return render(tree)
 
 
-def _group_vancouver_numbers(numbers: List[int]) -> str:
-    """Схлопывает массив номеров в диапазоны ([14,15,16,19] -> '14–16, 19')."""
-    if not numbers:
-        return ""
+def _group_vancouver_numbers(numbers: list[int]) -> str:
+    if not numbers: return ""
     numbers = sorted(list(set(numbers)))
-    ranges = []
-    start = prev = numbers[0]
-
+    ranges, start, prev = [], numbers[0], numbers[0]
     for n in numbers[1:]:
         if n == prev + 1:
             prev = n
         else:
-            if prev - start >= 2:
-                ranges.append(f"{start}–{prev}")
-            elif prev != start:
-                ranges.extend([str(start), str(prev)])
-            else:
-                ranges.append(str(start))
+            ranges.append(
+                f"{start}–{prev}" if prev - start >= 2 else (f"{start}, {prev}" if prev != start else str(start)))
             start = prev = n
-
-    if prev - start >= 2:
-        ranges.append(f"{start}–{prev}")
-    elif prev != start:
-        ranges.extend([str(start), str(prev)])
-    else:
-        ranges.append(str(start))
-
+    ranges.append(f"{start}–{prev}" if prev - start >= 2 else (f"{start}, {prev}" if prev != start else str(start)))
     return ", ".join(ranges)
 
 
 # УЗЛЫ LANGGRAPH
 
 def planner_node(state: GraphState) -> Dict[str, Any]:
-    """Узел 1: Строит план на основе метаданных базы."""
-
     topic = state["global_topic"]
+    raw_paths = get_database_topology(topic)
+    tree = build_markdown_tree(raw_paths)
 
-    raw_paths_from_db = get_database_topology(topic)
-
-    if not raw_paths_from_db:
-        raise ValueError("База вернула пустой список путей. Проверьте API или топик.")
-
-    content_tree = build_markdown_tree(raw_paths_from_db)
-
-    llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite", temperature=0.0)
+    llm = ChatGoogleGenerativeAI(model=config.LLM_MODEL)
     structured_llm = llm.with_structured_output(PlanOutput)
 
     system_prompt = f"""
@@ -132,95 +103,168 @@ def planner_node(state: GraphState) -> Dict[str, Any]:
     4. Выстрой логическую последовательность разделов от базовых концепций к сложным применениям.
     5. Сгенерируй финальный JSON, строго следуя Pydantic-схеме.
     """
-
-    user_prompt = f"Тема обзора: {topic}\n\nДЕРЕВО ДОСТУПНОГО КОНТЕНТА:\n{content_tree}"
-
-    result = structured_llm.invoke([
-        ("system", system_prompt),
-        ("user", user_prompt)
-    ])
+    result = structured_llm.invoke(system_prompt)
 
     pending = []
     for i, sec in enumerate(result.sections):
         pending.append(SectionState(
-            section_id=str(i + 1),
-            title=sec.title,
-            instructions=sec.instructions,
-            target_paths=sec.target_paths,  # ПРОКИДЫВАЕМ ПУТИ ДЛЯ МАТВЕЯ
-            content="",
-            used_chunk_ids=[]
+            section_id=str(i + 1), title=sec.title, instructions=sec.instructions, target_paths=sec.target_paths,
+            search_queries=[], raw_chunks=[], memory_bank=[], retriever_rejection="", retriever_retries=0,
+            draft_content="", draft_used_ids=[], citation_errors="", writer_retries=0, content="", used_chunk_ids=[]
         ))
 
     current = pending.pop(0) if pending else None
-
-    return {
-        "current_section": current,
-        "pending_sections": pending,
-        "completed_sections": []
-    }
+    return {"current_section": current, "pending_sections": pending}
 
 
-def external_writer_node(state: GraphState) -> Dict[str, Any]:
-    """
-    Узел 2: Adapter + Writer.
-    Граф отправляет запрос и валидирует ответ по контракту WriterOutput.
-    """
+def adapter_node(state: GraphState) -> Dict[str, Any]:
+    """Генерирует запрос и стягивает сырые данные из БД."""
+    current = state["current_section"]
+    current["retriever_retries"] += 1
+
+    query = generate_search_query(
+        task=current["instructions"],
+        previous_queries=current["search_queries"],
+        rejection_reason=current["retriever_rejection"]
+    )
+    current["search_queries"].append(query)
+
+    raw_chunks = db_connector.fetch_chunks(query=query, target_paths=current["target_paths"])
+    current["raw_chunks"] = raw_chunks
+    return {"current_section": current}
+
+
+def eval_retriever_node(state: GraphState) -> Dict[str, Any]:
+    current = state["current_section"]
+    query = current["search_queries"][-1]
+
+    raw_chunks = current["raw_chunks"]
+
+    if not raw_chunks:
+        current["retriever_rejection"] = "Отказ: База данных ничего не вернула по этому запросу."
+        return {"current_section": current}
+
+    # Настройки батчинга
+    BATCH_SIZE = 10
+    batches = [raw_chunks[i:i + BATCH_SIZE] for i in range(0, len(raw_chunks), BATCH_SIZE)]
+
+    results = {}
+
+    for batch in batches:
+        batch_result = check_relevance_batch(query, batch)
+        results.update(batch_result)
+
+        time.sleep(4.5)
+
+    valid_chunks = []
+    rejections = []
+
+    for chunk in raw_chunks:
+        chunk_id = chunk["id"]
+        eval_res = results.get(chunk_id,
+                               {"is_relevant": False, "reason": "LLM пропустила этот чанк при валидации"})
+
+        if eval_res["is_relevant"]:
+            valid_chunks.append(chunk)
+        else:
+            rejections.append(eval_res["reason"])
+
+    if valid_chunks:
+        current["memory_bank"] = valid_chunks
+        current["retriever_rejection"] = ""
+    else:
+        unique_reasons = list(set([r for r in rejections if r]))
+        current["retriever_rejection"] = f"Отказ: {', '.join(unique_reasons[:3])}"
+
+    return {"current_section": current}
+
+
+def writer_node(state: GraphState) -> Dict[str, Any]:
+    current = state["current_section"]
+    current["writer_retries"] += 1
+
+    prev_summary = state.get("previous_sections_summary", "")
+
+    draft = generate_section_draft(
+        title=current["title"],
+        instructions=current["instructions"],
+        memory_bank=current["memory_bank"],
+        previous_summary=prev_summary,
+        citation_errors=current["citation_errors"]
+    )
+
+    current["draft_content"] = draft.content
+    current["draft_used_ids"] = draft.used_chunk_ids
+    return {"current_section": current}
+
+
+def eval_citation_node(state: GraphState) -> Dict[str, Any]:
+    """Детерминированная AST-проверка галлюцинаций цитат."""
+    current = state["current_section"]
+    draft_text = current["draft_content"]
+
+    # Парсим теги [ID: xxx] из текста
+    found_ids = re.findall(r'\[ID:\s*([^\]]+)\]', draft_text)
+    found_ids = [fid.strip() for fid in found_ids]
+
+    valid_bank_ids = [c["id"] for c in current["memory_bank"]]
+    hallucinated_ids = [fid for fid in found_ids if fid not in valid_bank_ids]
+
+    if hallucinated_ids:
+        current[
+            "citation_errors"] = f"В тексте использованы несуществующие ID: {hallucinated_ids}. Используй ТОЛЬКО ID из ПАМЯТИ."
+    else:
+        current["citation_errors"] = ""
+        current["content"] = draft_text
+        current["used_chunk_ids"] = found_ids
+
+    return {"current_section": current}
+
+
+def advance_section_node(state: GraphState) -> Dict[str, Any]:
     current = state["current_section"]
 
-    # === ИМИТАЦИЯ ВЫЗОВА API ===
+    if not current["content"]:
+        current["content"] = current["draft_content"] or "[Секция не сгенерирована из-за нехватки данных]"
 
-    raw_response = {
-        "section_title": current["title"],
-        "content": f"## {current['title']}\nТекст по путям {current['target_paths']}. Скорость реакции растет [ID: 8f2][ID: 3b1].",
-        "used_chunk_ids": ["8f2", "3b1"]
-    }
+    completed = state.get("completed_sections", [])[:] + [current]
+    pending = state["pending_sections"][:]
 
-    validated_output = WriterOutput.model_validate(raw_response)
+    next_current = pending.pop(0) if pending else None
 
-    current["content"] = validated_output.content
-    current["used_chunk_ids"] = validated_output.used_chunk_ids
-
-    completed = state.get("completed_sections", []) + [current]
-    next_pending = state["pending_sections"]
-    next_current = next_pending.pop(0) if next_pending else None
+    current_summary = generate_short_summary(current["content"])
+    new_summary = state.get("previous_sections_summary", "") + f"\nРаздел '{current['title']}': {current_summary}"
 
     return {
         "current_section": next_current,
-        "pending_sections": next_pending,
-        "completed_sections": completed
+        "completed_sections": completed,
+        "pending_sections": pending,
+        "previous_sections_summary": new_summary
     }
 
 
 def compiler_node(state: GraphState) -> Dict[str, Any]:
-    """Узел 3: Сборка и форматирование ссылок (Vancouver)."""
     full_text = "\n\n".join([sec["content"] for sec in state["completed_sections"]])
     ref_map = {}
     ref_counter = 1
 
-    cluster_pattern = re.compile(r'(?:\[ID:\s*[^\]]+\])+')
-    single_id_pattern = re.compile(r'\[ID:\s*([^\]]+)\]')
-
     def process_cluster(match):
         nonlocal ref_counter
         cluster_text = match.group(0)
-        ids = single_id_pattern.findall(cluster_text)
-
-        numbers = []
-        for chunk_id in ids:
-            chunk_id = chunk_id.strip()
-            if chunk_id not in ref_map:
-                ref_map[chunk_id] = ref_counter
+        # Внутри кластера парсинг ID отработает четко, он игнорирует запятые
+        ids = re.findall(r'\[ID:\s*([^\]]+)\]', cluster_text)
+        nums = []
+        for cid in ids:
+            if cid.strip() not in ref_map:
+                ref_map[cid.strip()] = ref_counter
                 ref_counter += 1
-            numbers.append(ref_map[chunk_id])
+            nums.append(ref_map[cid.strip()])
+        return f"<sup>{_group_vancouver_numbers(nums)}</sup>"
 
-        grouped_string = _group_vancouver_numbers(numbers)
-        return f"<sup>{grouped_string}</sup>"
+    final_doc = re.sub(r'(?:\[ID:\s*[^\]]+\](?:[,\s]*))+', process_cluster, full_text)
 
-    final_document = cluster_pattern.sub(process_cluster, full_text)
+    final_doc += "\n\n## References\n"
+    for cid, num in sorted(ref_map.items(), key=lambda i: i[1]):
+        final_doc += f"{num}. [Database Node: {cid}]\n"
 
-    final_document += "\n\n## References\n"
-    sorted_refs = sorted(ref_map.items(), key=lambda item: item[1])
-    for chunk_id, num in sorted_refs:
-        final_document += f"{num}. Source document DOI/Metadata for {chunk_id}\n"
-
-    return {"final_document": final_document}
+    return {"final_document": final_doc}

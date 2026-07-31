@@ -1,12 +1,33 @@
 from langgraph.graph import StateGraph, END
+import config
 from state import GraphState
-from nodes import planner_node, external_writer_node, compiler_node
+from nodes import (
+    planner_node, adapter_node, eval_retriever_node,
+    writer_node, eval_citation_node, advance_section_node, compiler_node
+)
+
+
+def route_retriever(state: GraphState) -> str:
+    curr = state["current_section"]
+    if curr["retriever_rejection"] == "":  # Pass
+        return "writer_node"
+    if curr["retriever_retries"] >= config.MAX_RETRIES:  # Лимит исчерпан
+        return "writer_node"
+    return "adapter_node"  # Цикл
+
+
+def route_citation(state: GraphState) -> str:
+    curr = state["current_section"]
+    if curr["citation_errors"] == "":  # Pass
+        return "advance_section_node"
+    if curr["writer_retries"] >= config.MAX_RETRIES:  # Лимит исчерпан
+        return "advance_section_node"
+    return "writer_node"  # Цикл
 
 
 def route_sections(state: GraphState) -> str:
-    """Определяет, есть ли еще секции для написания."""
     if state["current_section"] is not None:
-        return "external_writer_node"
+        return "adapter_node"
     return "compiler_node"
 
 
@@ -14,20 +35,31 @@ def build_graph():
     workflow = StateGraph(GraphState)
 
     workflow.add_node("planner_node", planner_node)
-
-    # Единый узел Матвея (Adapter + Writer)
-    workflow.add_node("external_writer_node", external_writer_node)
-
+    workflow.add_node("adapter_node", adapter_node)
+    workflow.add_node("eval_retriever_node", eval_retriever_node)
+    workflow.add_node("writer_node", writer_node)
+    workflow.add_node("eval_citation_node", eval_citation_node)
+    workflow.add_node("advance_section_node", advance_section_node)
     workflow.add_node("compiler_node", compiler_node)
 
     workflow.set_entry_point("planner_node")
-    workflow.add_edge("planner_node", "external_writer_node")
 
+    workflow.add_edge("planner_node", "adapter_node")
+    workflow.add_edge("adapter_node", "eval_retriever_node")
+
+    # Loop 1: Data Retrieval
+    workflow.add_conditional_edges("eval_retriever_node", route_retriever)
+
+    # Loop 2: Generation & Fact-Checking
+    workflow.add_edge("writer_node", "eval_citation_node")
+    workflow.add_conditional_edges("eval_citation_node", route_citation)
+
+    # Section advancement
     workflow.add_conditional_edges(
-        "external_writer_node",
+        "advance_section_node",
         route_sections,
         {
-            "external_writer_node": "external_writer_node",
+            "adapter_node": "adapter_node",
             "compiler_node": "compiler_node"
         }
     )
@@ -38,14 +70,5 @@ def build_graph():
 
 if __name__ == "__main__":
     app = build_graph()
-
-    initial_state = {
-        "global_topic": "Advancements in Catalytic Conversion of Biomass",
-        "pending_sections": [],
-        "current_section": None,
-        "completed_sections": [],
-        "final_document": ""
-    }
-
-    result = app.invoke(initial_state)
+    result = app.invoke({"global_topic": "Nanostructuring of metals"})
     print(result["final_document"])

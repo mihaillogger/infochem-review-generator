@@ -8,6 +8,9 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
     raise ValueError("КРИТИЧЕСКАЯ ОШИБКА: GOOGLE_API_KEY не найден. Проверьте файл .env")
 
-FASTAPI_ENDPOINT = "http://localhost:8000/search"
+DB_API_URL = os.getenv("DB_API_URL")
 
 LLM_MODEL = "gemini-3.5-flash-lite"
+
+# Лимиты для защиты от бесконечных циклов
+MAX_RETRIES = 3
