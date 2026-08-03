@@ -15,6 +15,14 @@ data/
 *.jpg
 *.jpeg
 
+# Override-файлы
+docker-compose.override.yml.example
+
+# Логи
+module_2_parser_db/logs/
+logs/
+*.log
+
 # Выхлоп прогонов загрузчика: сами PDF и manifest/metadata с путями к ним.
 # Именно test_* с подчёркиванием — не задеть папку с тестами tests/.
 module_1_downloader/test_*/
@@ -22,7 +30,7 @@ module_1_downloader/downloads/
 module_1_downloader/manifest.json
 
 # База данных
-module_2_parser_db/chroma_data/
+module_2_parser_db/qdrant_data/
 *.sqlite3
 *.db
 

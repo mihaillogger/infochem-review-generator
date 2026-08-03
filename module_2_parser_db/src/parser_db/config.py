@@ -12,16 +12,34 @@ class Settings(BaseSettings):
     API_TITLE: str = "Infochem RAG Core API"
     API_DESCRIPTION: str = "Ядро семантического поиска и парсинга научных статей."
     API_VERSION: str = "1.0.0"
+    API_KEY: str
+    API_KEY_HEADER_NAME: str = "X-API-Key"
 
     # Инфраструктурные переменные
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
+
+    REDIS_PASSWORD: str
     REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_SOCKET_TIMEOUT: int = 10
+
+    PROCESSED_DATA_ROOT: str = "/data/processed"
+    SHARED_DATA_ROOT: str = "/data/pdfs"
+    PARSED_FILE_SUFFIX: str = "_parsed.json"
+
+    # Настройки вычислений
+    COMPUTE_DEVICE: str = "cpu"
 
     # Настройки моделей
     EMBEDDING_MODEL_NAME: str = "nomic-ai/nomic-embed-text-v1.5"
     EMBEDDING_DIM: int = 768
+    EMBEDDING_BATCH_SIZE: int = (
+        4  # 0 для снятия ограничения (векторизация всего массива за один проход)
+    )
+    EMBEDDING_PREFIX_DOC: str = "search_document: "
+    EMBEDDING_PREFIX_QUERY: str = "search_query: "
     MAX_TOKENS: int = 8192
+
     SPARSE_MODEL_NAME: str = "Qdrant/bm25"
 
     # Настройки коллекции Qdrant
@@ -29,6 +47,8 @@ class Settings(BaseSettings):
     DENSE_DISTANCE: str = "Cosine"
     DENSE_DATATYPE: str = "float32"
     SPARSE_ON_DISK: bool = False
+
+    QDRANT_BASE_THRESHOLD: float = 0.70
 
     # Настройки текстового индекса
     TEXT_INDEX_MIN_LEN: int = 2
@@ -53,7 +73,8 @@ class Settings(BaseSettings):
 
     # Настройки агентов и поиска
     SEARCH_DEFAULT_LIMIT: int = 5
-    SEARCH_MAX_LIMIT: int = 20
+    SEARCH_MAX_LIMIT: int = 10000
+    SEARCH_PREFETCH_MULTIPLIER: int = 2
 
     # Настройки RFC 9457 (Ошибки и инструкции для агентов)
     RFC_TYPE_VALIDATION: str = "https://datatracker.ietf.org/doc/html/rfc9457#section-3"
@@ -69,18 +90,52 @@ class Settings(BaseSettings):
         "Сделай паузу и повтори запрос позже."
     )
 
+    LLM_PROMPT_TABLE_SUMMARY: str = (
+        "You are an expert AI in chemistry and material science. "
+        "Analyze the following table from a scientific paper and provide a concise, "
+        "dense text summary of its contents, trends, and key variables. "
+        "Constraints:\n"
+        "1. Respond strictly in English.\n"
+        "2. Do not use markdown tables or bullet points.\n"
+        "3. Output ONLY the raw text summary without any introductory phrases "
+        "(e.g., do not write 'Here is...').\n"
+        "4. If the table is empty, unreadable, or contains only meaningless formatting artifacts, "
+        "output exactly: UNREADABLE_TABLE.\n\n"
+    )
+
     # Настройки логирования и профилирования
     DEBUG: bool = False
     LOG_DIR: str = "logs"
     LOG_FILE: str = "app.log"
+    PROFILING_FILE: str = "profiler.jsonl"
+
+    # Файлы логов
+    LOG_MAX_BYTES: int = 10485760  # 10 МБ
+    LOG_BACKUP_COUNT: int = 5  # 5 старых архивов
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     def get_log_path(self) -> Path:
-        """Возвращает абсолютный путь к файлу логов, создавая папку при необходимости."""
+        """
+        Возвращает абсолютный путь к файлу логов, создавая папку при необходимости.
+
+        Returns:
+            Path: Абсолютный путь к файлу логов.
+        """
         log_path = Path(self.LOG_DIR)
         log_path.mkdir(parents=True, exist_ok=True)
         return log_path / self.LOG_FILE
 
+    def get_profiling_path(self) -> Path:
+        """
+        Возвращает абсолютный путь к файлу метрик профилирования.
 
-settings = Settings()
+        Returns:
+            Path: Абсолютный путь к файлу метрик.
+        """
+        log_path = Path(self.LOG_DIR)
+        log_path.mkdir(parents=True, exist_ok=True)
+        return log_path / self.PROFILING_FILE
+
+
+settings = Settings()  # type: ignore[call-arg]
