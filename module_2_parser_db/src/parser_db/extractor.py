@@ -115,7 +115,14 @@ def extract_exact_visual_id(caption: str, default_id: str) -> str:
 def is_smiles(text: str) -> bool:
     """Проверяет, похожа ли строка на химическую нотацию SMILES."""
     smiles_pattern = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)\\=#/]+$")
-    return bool(smiles_pattern.match(text))
+    if not smiles_pattern.match(text):
+        return False
+
+    # Исключаем обычные слова-паразиты, состоящие только из строчных букв
+    if text.isalpha() and text.islower():
+        return False
+
+    return True
 
 
 def is_table_broken(html_markup: str) -> bool:
@@ -149,6 +156,23 @@ def clean_text_lite(text: str) -> str:
 
     text = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def to_docker_path(local_path: str) -> str:
+    """Конвертирует локальный абсолютный путь винды в формат Docker (/data/...)."""
+    if not local_path:
+        return local_path
+
+    # Заменяем обратные слеши на прямые
+    normalized = local_path.replace("\\", "/")
+
+    # Ищем папку data и отрезаем всё, что было до неё
+    if "/data/" in normalized:
+        return normalized[normalized.find("/data/") :]
+    elif "data/" in normalized:
+        return "/" + normalized[normalized.find("data/") :]
+
+    return normalized
 
 
 def calculate_iou(box1: list[float], box2: list[float]) -> float:
@@ -326,7 +350,9 @@ def build_parsed_document(
         if not final_path:
             final_path = os.path.abspath(vis_buffer_paths[0])
 
-        visuals.append(VisualMeta(id=exact_id, path=final_path, caption=current_main_caption))
+        visuals.append(
+            VisualMeta(id=exact_id, path=to_docker_path(final_path), caption=current_main_caption)
+        )
         current_paragraphs.append(
             Paragraph(type="image", content=f"[{exact_id}: {current_main_caption}]")
         )
@@ -368,7 +394,7 @@ def build_parsed_document(
                 sections.append(
                     Section(
                         original_heading=current_heading_str,
-                        macro_category=current_heading_enum.value,
+                        macro_category=current_heading_enum.value,  # type: ignore
                         level=current_level,
                         paragraphs=current_paragraphs,
                     )
@@ -391,7 +417,7 @@ def build_parsed_document(
                         type="equation",
                         content=content,
                         is_broken=True,
-                        image_fallback_path=img_path,
+                        image_fallback_path=to_docker_path(img_path),
                     )
                 )
             continue
@@ -445,7 +471,7 @@ def build_parsed_document(
                         type="table",
                         content=table_html,
                         is_broken=True,
-                        image_fallback_path=img_path,
+                        image_fallback_path=to_docker_path(img_path),
                     )
                 )
             else:
@@ -463,7 +489,7 @@ def build_parsed_document(
         sections.append(
             Section(
                 original_heading=current_heading_str,
-                macro_category=current_heading_enum.value,
+                macro_category=current_heading_enum.value,  # type: ignore
                 level=current_level,
                 paragraphs=current_paragraphs,
             )
