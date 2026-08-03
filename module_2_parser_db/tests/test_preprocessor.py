@@ -56,9 +56,10 @@ def test_extract_visual_ids() -> None:
     """Проверяет поиск идентификаторов картинок по регулярным выражениям."""
     visuals = [VisualMeta(id="Fig. 1", path="dummy.jpg")]
     patterns = build_visuals_patterns(visuals)
+    image_map = {"Fig. 1": "/data/images/fig1.png"}
 
     text = "Как видно на fig. 1, результаты отличные. И еще Fig. 2."
-    found = extract_visual_ids(text, patterns)
+    found = extract_visual_ids(text, patterns, image_map)
 
     # Должен найти Fig. 1 игнорируя регистр, Fig. 2 игнорируется
     assert "Fig. 1" in found
