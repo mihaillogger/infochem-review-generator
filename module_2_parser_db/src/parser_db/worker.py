@@ -2,69 +2,135 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import structlog
+from pydantic import ValidationError
+from structlog.contextvars import bind_contextvars, clear_contextvars
+from taskiq import Context, TaskiqDepends, TaskiqEvents, TaskiqState
 
 from parser_db.broker import broker
 from parser_db.chunker import chunk_document
+from parser_db.config import settings
+from parser_db.embedder import NomicEmbedder
 from parser_db.enricher import enrich_document
+from parser_db.llm import AsyncGeminiClient
+from parser_db.logger import setup_logging
+from parser_db.preprocessor import warmup_tokenizer
 from parser_db.profiler import profile_time
-from parser_db.schemas import ParsedDocument
+from parser_db.schemas import ParsedDocument, ParseTaskResult
 from parser_db.store import get_store
 
+setup_logging()
 logger = structlog.get_logger(__name__)
 
 
-@broker.task(task_name="parse_pdf_task")
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
 @profile_time
-async def parse_pdf_task(file_paths: list[str]) -> dict[str, Any]:
+async def warmup_models(state: TaskiqState) -> None:
     """
-    Асинхронная задача для векторизации обработанных документов.
+    Прогрев нейросетей внутри изолированного процесса воркера
+    до того, как он начнет тянуть задачи из очереди.
 
-    Находит готовые JSON-файлы от парсера MinerU, десериализует их,
+    Args:
+        state (TaskiqState): Текущее состояние и контекст воркера.
+    """
+    logger.info("worker_warmup_started", message="Loading models into memory...")
+
+    store = await get_store()
+
+    await asyncio.to_thread(warmup_tokenizer)
+    await asyncio.to_thread(store.dense_embedder.encode_batch, ["warmup_query"], is_document=False)
+
+    logger.info("worker_warmup_finished", message="Models are hot and ready!")
+
+
+@broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
+async def shutdown_models(state: TaskiqState) -> None:
+    """
+    Очищает ресурсы воркера при его остановке.
+
+    Закрывает сетевые соединения с векторной базой данных, предотвращая
+    утечку файловых дескрипторов.
+
+    Args:
+        state (TaskiqState): Текущее состояние и контекст воркера.
+    """
+    logger.info("worker_shutdown_started", message="Releasing resources...")
+    store = await get_store()
+    await store.close()
+    logger.info("worker_shutdown_finished", message="Worker resources released!")
+
+
+@broker.task(task_name="vectorize_document_task")
+@profile_time
+async def vectorize_document_task(
+    file_path: str, context: Context = TaskiqDepends()
+) -> ParseTaskResult:
+    """
+    Асинхронная задача для векторизации обработанного документа.
+
+    Находит готовый JSON-файл от парсера, десериализует его,
     нарезает текст на чанки и сохраняет в векторную базу данных.
 
     Args:
-        file_paths: Список абсолютных путей к сырым PDF.
+        file_path (str): Абсолютный путь к сырому PDF.
+        context (Context): Контекст выполнения задачи от TaskIQ.
 
     Returns:
-        Словарь со статусом выполнения и количеством обработанных файлов.
+        ParseTaskResult: Объект с результатами выполнения задачи.
+
+    Raises:
+        ValueError: Если передан пустой путь к файлу.
+        FileNotFoundError: Если JSON-файл от парсера не найден.
+        ValidationError: Если структура JSON-файла не прошла валидацию Pydantic.
+        Exception: При возникновении прочих непредвиденных ошибок обработки.
     """
-    if not file_paths:
-        return {"status": "success", "processed_files": 0}
+    clear_contextvars()
+    bind_contextvars(task_id=context.message.task_id)
 
-    processed = 0
-    first_pdf = Path(file_paths[0])
-    parsed_data_dir = first_pdf.parent.parent / "processed"
+    logger.info("vectorize_document_task_started", file_path=file_path)
 
-    for path_str in file_paths:
-        pdf_path = Path(path_str)
+    if not file_path:
+        error_msg = "Получен пустой путь к файлу"
+        logger.error("vectorize_document_task_invalid_input", error=error_msg)
+        raise ValueError(error_msg)
+
+    try:
+        pdf_path = Path(file_path)
         log = logger.bind(file_name=pdf_path.name)
 
-        mineru_json_path = parsed_data_dir / f"{pdf_path.stem}_parsed.json"
+        parsed_data_dir = Path(settings.PROCESSED_DATA_ROOT)
+        mineru_json_path = parsed_data_dir / f"{pdf_path.stem}{settings.PARSED_FILE_SUFFIX}"
 
         if not mineru_json_path.exists():
             log.warning("mineru_json_not_found", expected_path=str(mineru_json_path))
-            continue
+            raise FileNotFoundError(f"JSON-файл парсера не найден по пути: {mineru_json_path}")
 
         try:
             json_text = await asyncio.to_thread(mineru_json_path.read_text, encoding="utf-8")
             doc = ParsedDocument.model_validate_json(json_text)
-        except Exception as e:
+        except ValidationError as e:
             log.exception("mineru_validation_failed", error=str(e))
-            continue
+            raise
+        except Exception as e:
+            log.exception("mineru_read_failed", error=str(e))
+            raise
 
-        doc = await enrich_document(doc)
+        llm_client = AsyncGeminiClient()
+        doc = await enrich_document(doc, llm_client)
 
-        chunks = await asyncio.to_thread(chunk_document, doc)
+        embedder = NomicEmbedder()
+        chunks = await asyncio.to_thread(chunk_document, doc, embedder)
 
         if chunks:
-            # Инициализируем БД только тогда, когда есть что сохранять
             store = await get_store()
             await store.insert_chunks(chunks)
 
-        processed += 1
+        logger.info("vectorize_document_task_finished", file_path=file_path)
+        return ParseTaskResult(status="success", file_path=file_path)
 
-    logger.info("parse_pdf_task_finished", processed_files=processed, total_files=len(file_paths))
-    return {"status": "success", "processed_files": processed}
+    except Exception as e:
+        logger.error(
+            "vectorize_document_task_failed", file_path=file_path, error=str(e), exc_info=True
+        )
+        raise

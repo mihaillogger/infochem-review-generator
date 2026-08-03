@@ -88,7 +88,7 @@ class AsyncQdrantStore:
             # Текстовый индекс для разделов
             await self.client.create_payload_index(
                 collection_name=self.collection_name,
-                field_name="section_path",
+                field_name="macro_category_path",
                 field_schema=models.TextIndexParams(
                     type=models.TextIndexType.TEXT,
                     tokenizer=models.TokenizerType.WORD,
@@ -97,6 +97,11 @@ class AsyncQdrantStore:
                     lowercase=settings.TEXT_INDEX_LOWERCASE,
                 ),
             )
+
+    async def close(self) -> None:
+        """Асинхронно закрывает пулы сетевых соединений клиента Qdrant."""
+        logger.info("closing_qdrant_connection", collection=self.collection_name)
+        await self.client.close()
 
     @profile_time
     async def insert_chunks(self, chunks: list[DBChunk]) -> None:
@@ -193,7 +198,7 @@ class AsyncQdrantStore:
         if section_filter:
             must_conditions.append(
                 models.FieldCondition(
-                    key="section_path", match=models.MatchText(text=section_filter)
+                    key="macro_category_path", match=models.MatchText(text=section_filter)
                 )
             )
         if require_table:
@@ -213,8 +218,9 @@ class AsyncQdrantStore:
                 models.Prefetch(
                     query=dense_query,
                     using="dense_vector",
-                    limit=limit * 2,
+                    limit=limit * settings.SEARCH_PREFETCH_MULTIPLIER,
                     filter=q_filter,
+                    score_threshold=settings.QDRANT_BASE_THRESHOLD,
                 ),
                 models.Prefetch(
                     query=models.SparseVector(
@@ -222,7 +228,7 @@ class AsyncQdrantStore:
                         values=sparse_query.values.tolist(),
                     ),
                     using="sparse_vector",
-                    limit=limit * 2,
+                    limit=limit * settings.SEARCH_PREFETCH_MULTIPLIER,
                     filter=q_filter,
                 ),
             ],
@@ -240,8 +246,14 @@ class AsyncQdrantStore:
                     "text": payload.get("text", ""),
                     "metadata": {
                         "doi": payload.get("doi", ""),
-                        "section_path": payload.get("section_path", ""),
-                        "linked_images": payload.get("linked_images", []),
+                        "title": payload.get("title"),
+                        "authors": payload.get("authors", []),
+                        "year": payload.get("year"),
+                        "journal": payload.get("journal"),
+                        "abstract": payload.get("abstract"),
+                        "original_heading_path": payload.get("original_heading_path", ""),
+                        "macro_category_path": payload.get("macro_category_path", ""),
+                        "linked_images": payload.get("linked_images", {}),
                         "contains_table": payload.get("contains_table", False),
                         "contains_math": payload.get("contains_math", False),
                         "raw_table_markup": payload.get("raw_table_markup"),
@@ -256,7 +268,14 @@ class AsyncQdrantStore:
             )
 
         logger.info(
-            "hybrid_search_executed", query=query, limit=limit, results=len(formatted_results)
+            "hybrid_search_executed",
+            query=query,
+            limit=limit,
+            doi_filter=doi_filter,
+            section_filter=section_filter,
+            require_table=require_table,
+            require_math=require_math,
+            results=len(formatted_results),
         )
         return formatted_results
 

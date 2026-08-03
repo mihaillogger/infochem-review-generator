@@ -4,14 +4,40 @@ import re
 from typing import TypedDict
 
 import structlog
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from parser_db.config import settings
 from parser_db.schemas import Paragraph, VisualMeta
 
 logger = structlog.get_logger(__name__)
 
-tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL_NAME, trust_remote_code=True)
+_tokenizer = None
+
+
+def get_tokenizer() -> PreTrainedTokenizerBase:
+    """
+    Ленивая инициализация токенизатора.
+
+    Загружает модель при первом обращении, исключая блокировку Event Loop при импорте.
+
+    Returns:
+        AutoTokenizer: Инициализированный объект токенизатора.
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained(
+            settings.EMBEDDING_MODEL_NAME, trust_remote_code=True
+        )
+    return _tokenizer
+
+
+def warmup_tokenizer() -> None:
+    """
+    Принудительная загрузка весов токенизатора в память.
+
+    Вызывается при старте приложения для подготовки модели до начала обработки запросов.
+    """
+    get_tokenizer()
 
 
 class SandwichBlock(TypedDict):
@@ -32,11 +58,12 @@ def count_tokens(text: str) -> int:
     Подсчитывает точное количество токенов в тексте.
 
     Args:
-        text: Исходный текст.
+        text (str): Исходный текст.
 
     Returns:
-        Количество токенов согласно словарю модели.
+        int: Количество токенов согласно словарю модели.
     """
+    tokenizer = get_tokenizer()
     return len(tokenizer.encode(text, add_special_tokens=False))
 
 
@@ -82,6 +109,7 @@ def split_recursively(text: str, max_tokens: int) -> tuple[list[str], bool]:
     # Если даже по пробелам не бьется, режем по токенам
     logger.warning("fallback_token_split_used", text_length=len(text))
 
+    tokenizer = get_tokenizer()
     tokens = tokenizer.encode(text)
     chunks = [tokens[i : i + max_tokens] for i in range(0, len(tokens), max_tokens)]
 
@@ -177,24 +205,28 @@ def build_visuals_patterns(document_visuals: list[VisualMeta]) -> dict[str, re.P
     return patterns
 
 
-def extract_visual_ids(text: str, patterns: dict[str, re.Pattern[str]]) -> set[str]:
+def extract_visual_ids(
+    text: str, patterns: dict[str, re.Pattern[str]], image_map: dict[str, str]
+) -> dict[str, str]:
     """
-    Ищет ссылки на иллюстрации по заранее скомпилированным паттернам.
+    Ищет ссылки на иллюстрации по заранее скомпилированным паттернам
+    и возвращает словарь {ID: Путь}.
 
     Args:
         text: Текст текущего чанка/блока.
         patterns: Словарь скомпилированных паттернов от build_visuals_patterns.
+        image_map: Словарь всех картинок документа {ID: Путь}.
 
     Returns:
-        set: Множество найденных точных ID (например, {'Fig. 1', 'Table 2'}).
+        dict[str, str]: Словарь найденных картинок и их путей.
     """
-    found_ids: set[str] = set()
+    found_images: dict[str, str] = {}
 
     if not text:
-        return found_ids
+        return found_images
 
     for exact_id, pattern in patterns.items():
         if pattern.search(text):
-            found_ids.add(exact_id)
+            found_images[exact_id] = image_map.get(exact_id, "")
 
-    return found_ids
+    return found_images
