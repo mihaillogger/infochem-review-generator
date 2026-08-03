@@ -144,7 +144,6 @@ def clean_text_lite(text: str) -> str:
     """Очищает текст от базовых артефактов MinerU без потери химических формул."""
     text = text.replace("\u0001", "°").replace("\u0003", "-")
 
-    # Удаляем строго HTML-теги (начинаются с буквы или /), игнорируя математику типа A < B > C
     if "<" in text and ">" in text:
         text = re.sub(r"</?[a-zA-Z][^>]*>", "", text)
 
@@ -153,7 +152,7 @@ def clean_text_lite(text: str) -> str:
 
 
 def calculate_iou(box1: list[float], box2: list[float]) -> float:
-    """Вычисляет метрику Intersection over Union для отсева дубликатов."""
+    """Обычный IoU для удаления только 100% дубликатов."""
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
     x2 = min(box1[2], box2[2])
@@ -166,52 +165,133 @@ def calculate_iou(box1: list[float], box2: list[float]) -> float:
     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
-    return inter_area / float(box1_area + box2_area - inter_area)
+    union_area = float(box1_area + box2_area - inter_area)
+    if union_area == 0:
+        return 0.0
+
+    return inter_area / union_area
 
 
-def stitch_visuals(paths: list[str], bboxes: list[list[float]], out_path: str) -> str:
-    """Склеивает фрагментированные изображения графиков по координатам с отсевом дублей."""
-    valid_data = []
-    for p, b in zip(paths, bboxes):
+def stitch_visuals(
+    paths: list[str], bboxes: list[list[float]], pages: list[int], out_path: str
+) -> str:
+    """Собирает фрагменты в визуальную сетку (строки и столбцы) без белых дыр."""
+    valid_data: list[dict[str, Any]] = []
+    for p, b, pg in zip(paths, bboxes, pages):
         abs_p = os.path.abspath(p)
-        if os.path.exists(abs_p):
-            valid_data.append((abs_p, b))
+        if os.path.exists(abs_p) and len(b) == 4:
+            valid_data.append({"path": abs_p, "bbox": b, "page": pg})
 
     if not valid_data:
         return ""
 
-    # Отсев пересекающихся боксов (дублей от MinerU)
-    filtered_data = [valid_data[0]]
-    for curr_path, curr_box in valid_data[1:]:
-        is_duplicate = False
-        for _, prev_box in filtered_data:
-            if calculate_iou(curr_box, prev_box) > 0.15:
-                is_duplicate = True
-                break
-        if not is_duplicate:
-            filtered_data.append((curr_path, curr_box))
+    pages_dict: dict[int, list[dict[str, Any]]] = {}
+    for item in valid_data:
+        pages_dict.setdefault(item["page"], []).append(item)
 
-    min_x = min(b[0] for _, b in filtered_data)
-    min_y = min(b[1] for _, b in filtered_data)
-    max_x = max(b[2] for _, b in filtered_data)
-    max_y = max(b[3] for _, b in filtered_data)
+    # Используем Any, чтобы mypy не ругался на конфликты типов Pillow
+    page_canvases: list[Any] = []
 
-    width, height = int(max_x - min_x), int(max_y - min_y)
-    if width <= 0 or height <= 0:
-        return filtered_data[0][0]
+    for pg, items in sorted(pages_dict.items()):
+        # 1. Жесткая фильтрация только полных клонов
+        filtered_items: list[dict[str, Any]] = []
+        for curr_item in items:
+            is_duplicate = False
+            for prev_item in filtered_items:
+                if calculate_iou(curr_item["bbox"], prev_item["bbox"]) > 0.95:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                filtered_items.append(curr_item)
 
-    canvas = Image.new("RGB", (width, height), "white")
-    for path, bbox in filtered_data:
-        with Image.open(path) as img:
-            canvas.paste(img, (int(bbox[0] - min_x), int(bbox[1] - min_y)))
+        if not filtered_items:
+            continue
+
+        if len(filtered_items) == 1:
+            with Image.open(filtered_items[0]["path"]) as img_single:
+                page_canvases.append(img_single.convert("RGB"))
+            continue
+
+        # 2. Сортируем элементы сверху вниз
+        filtered_items.sort(key=lambda x: x["bbox"][1])
+
+        # 3. Разбиваем на горизонтальные ряды
+        rows: list[list[dict[str, Any]]] = []
+        for item in filtered_items:
+            if not rows:
+                rows.append([item])
+            else:
+                current_row_bottom = rows[-1][0]["bbox"][3]
+                if item["bbox"][1] < current_row_bottom:
+                    rows[-1].append(item)
+                else:
+                    rows.append([item])
+
+        # 4. Собираем ряды и клеим их горизонтально
+        row_images: list[Any] = []
+        for row in rows:
+            row.sort(key=lambda x: x["bbox"][0])
+
+            imgs = [Image.open(x["path"]).convert("RGB") for x in row]
+            max_h = max(im.height for im in imgs)
+
+            resized_imgs: list[Any] = []
+            for im in imgs:
+                if im.height != max_h:
+                    new_w = int(im.width * (max_h / im.height))
+                    resized_imgs.append(im.resize((new_w, max_h), Image.Resampling.LANCZOS))
+                else:
+                    resized_imgs.append(im)
+
+            row_w = sum(im.width for im in resized_imgs) + 20 * (len(resized_imgs) - 1)
+            row_canvas = Image.new("RGB", (row_w, max_h), "white")
+
+            curr_x = 0
+            for r_img in resized_imgs:
+                row_canvas.paste(r_img, (curr_x, 0))
+                curr_x += r_img.width + 20
+
+            row_images.append(row_canvas)
+
+        # 5. Склеиваем готовые ряды вертикально
+        max_w = max(im.width for im in row_images)
+        total_h = sum(im.height for im in row_images) + 20 * (len(row_images) - 1)
+
+        pg_canvas = Image.new("RGB", (max_w, total_h), "white")
+        curr_y = 0
+        for r_img_row in row_images:
+            x_offset = (max_w - r_img_row.width) // 2
+            pg_canvas.paste(r_img_row, (x_offset, curr_y))
+            curr_y += r_img_row.height + 20
+
+        page_canvases.append(pg_canvas)
+
+    if not page_canvases:
+        return ""
+
+    # 6. Финальный аккорд: склеиваем страницы друг под другом
+    if len(page_canvases) == 1:
+        final_canvas = page_canvases[0]
+    else:
+        max_final_w = max(im.width for im in page_canvases)
+        total_final_h = sum(im.height for im in page_canvases) + 20 * (len(page_canvases) - 1)
+
+        final_canvas = Image.new("RGB", (max_final_w, total_final_h), "white")
+        current_y = 0
+        for pg_img in page_canvases:
+            x_offset = (max_final_w - pg_img.width) // 2
+            final_canvas.paste(pg_img, (x_offset, current_y))
+            current_y += pg_img.height + 20
 
     abs_out = os.path.abspath(out_path)
-    canvas.save(abs_out)
+    os.makedirs(os.path.dirname(abs_out), exist_ok=True)
+    final_canvas.save(abs_out)
+
     return abs_out
 
 
 def build_parsed_document(
-    mineru_data: list[dict[str, Any]], metadata: dict[str, Any]
+    mineru_data: list[dict[str, Any]], metadata: dict[str, Any], output_images_dir: str = "."
 ) -> ParsedDocument:
     """Собирает объект ParsedDocument с буферизацией и склейкой визуальных блоков."""
     sections: list[Section] = []
@@ -224,19 +304,25 @@ def build_parsed_document(
 
     vis_buffer_paths: list[str] = []
     vis_buffer_bboxes: list[list[float]] = []
+    vis_buffer_pages: list[int] = []
     current_main_caption = ""
     current_visual_id = ""
 
     def flush_visual_buffer() -> None:
-        """Сбрасывает накопленные картинки в один склеенный объект."""
-        nonlocal vis_buffer_paths, vis_buffer_bboxes, current_main_caption, current_visual_id
+        nonlocal \
+            vis_buffer_paths, \
+            vis_buffer_bboxes, \
+            vis_buffer_pages, \
+            current_main_caption, \
+            current_visual_id
         if not vis_buffer_paths:
             return
 
         exact_id = current_visual_id or f"Vis_{len(visuals)}"
-        out_path = f"stitched_{exact_id.replace(' ', '_')}.png"
+        safe_id = re.sub(r"[^a-zA-Z0-9_]", "_", exact_id)
+        out_path = os.path.join(output_images_dir, f"stitched_{safe_id}.png")
 
-        final_path = stitch_visuals(vis_buffer_paths, vis_buffer_bboxes, out_path)
+        final_path = stitch_visuals(vis_buffer_paths, vis_buffer_bboxes, vis_buffer_pages, out_path)
         if not final_path:
             final_path = os.path.abspath(vis_buffer_paths[0])
 
@@ -247,6 +333,7 @@ def build_parsed_document(
 
         vis_buffer_paths.clear()
         vis_buffer_bboxes.clear()
+        vis_buffer_pages.clear()
         current_main_caption = ""
         current_visual_id = ""
 
@@ -258,14 +345,19 @@ def build_parsed_document(
         if block_type in ["text", "equation", "inline_equation", "table"]:
             if block_type == "text":
                 if len(content) < 5 and re.match(r"^\(?[a-zA-Z]\)?$", content):
-                    # Если попался кусок подписи типа "a)", привязываем к буферу
                     if vis_buffer_paths and not current_main_caption:
                         current_main_caption = content
                     continue
+
                 if re.match(r"^(Fig\.|Figure|Table|Scheme)", content, re.IGNORECASE):
+                    new_id = extract_exact_visual_id(content, "")
+                    if new_id and current_visual_id and new_id != current_visual_id:
+                        flush_visual_buffer()
+
                     current_main_caption = content
-                    current_visual_id = extract_exact_visual_id(content, f"Vis_{len(visuals)}")
+                    current_visual_id = new_id or f"Vis_{len(visuals)}"
                     continue
+
             flush_visual_buffer()
 
         if block_type == "text" and "text_level" in block:
@@ -307,9 +399,33 @@ def build_parsed_document(
         if block_type in ["image", "chart"]:
             img_path = block.get("img_path", "")
             bbox = block.get("bbox")
+            page_idx = block.get("page_idx", 0)
+
+            raw_caption = block.get("image_caption", [])
+            if isinstance(raw_caption, list) and raw_caption:
+                caption_text = " ".join(raw_caption).strip()
+            elif isinstance(raw_caption, str):
+                caption_text = raw_caption.strip()
+            else:
+                caption_text = ""
+
+            new_id = extract_exact_visual_id(caption_text, "") if caption_text else ""
+
+            if new_id and current_visual_id and new_id != current_visual_id:
+                flush_visual_buffer()
+
+            if caption_text and not current_main_caption:
+                current_main_caption = caption_text
+
+            if new_id:
+                current_visual_id = new_id
+            elif caption_text and not current_visual_id:
+                current_visual_id = f"Vis_{len(visuals)}"
+
             if img_path and bbox:
                 vis_buffer_paths.append(img_path)
                 vis_buffer_bboxes.append(bbox)
+                vis_buffer_pages.append(page_idx)
             continue
 
         if block_type == "table":
@@ -319,7 +435,6 @@ def build_parsed_document(
 
             raw_caption = block.get("table_caption", [])
             caption = " ".join(raw_caption).strip() if raw_caption else ""
-
             img_path = block.get("img_path", "")
             if img_path:
                 img_path = os.path.abspath(img_path)
