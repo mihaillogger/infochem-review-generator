@@ -115,7 +115,14 @@ def extract_exact_visual_id(caption: str, default_id: str) -> str:
 def is_smiles(text: str) -> bool:
     """Проверяет, похожа ли строка на химическую нотацию SMILES."""
     smiles_pattern = re.compile(r"^[A-Za-z0-9@+\-\[\]\(\)\\=#/]+$")
-    return bool(smiles_pattern.match(text))
+    if not smiles_pattern.match(text):
+        return False
+
+    # Исключаем обычные слова-паразиты, состоящие только из строчных букв
+    if text.isalpha() and text.islower():
+        return False
+
+    return True
 
 
 def is_table_broken(html_markup: str) -> bool:
