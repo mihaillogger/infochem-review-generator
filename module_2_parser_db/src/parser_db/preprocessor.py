@@ -1,14 +1,56 @@
 """Модуль предобработки распарсенного текста перед чанкингом."""
 
 import re
-from typing import Any
+from typing import TypedDict
 
-from transformers import AutoTokenizer
+import structlog
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from parser_db.config import settings
 from parser_db.schemas import Paragraph, VisualMeta
 
-tokenizer = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL_NAME, trust_remote_code=True)
+logger = structlog.get_logger(__name__)
+
+_tokenizer = None
+
+
+def get_tokenizer() -> PreTrainedTokenizerBase:
+    """
+    Ленивая инициализация токенизатора.
+
+    Загружает модель при первом обращении, исключая блокировку Event Loop при импорте.
+
+    Returns:
+        AutoTokenizer: Инициализированный объект токенизатора.
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained(
+            settings.EMBEDDING_MODEL_NAME, trust_remote_code=True
+        )
+    return _tokenizer
+
+
+def warmup_tokenizer() -> None:
+    """
+    Принудительная загрузка весов токенизатора в память.
+
+    Вызывается при старте приложения для подготовки модели до начала обработки запросов.
+    """
+    get_tokenizer()
+
+
+class SandwichBlock(TypedDict):
+    text: str
+    is_sandwich: bool
+    contains_table: bool
+    contains_math: bool
+    raw_table_markup: str | None
+    raw_math_markup: list[str] | None
+    is_broken_table: bool
+    is_broken_math: bool
+    fallback_table_path: str | None
+    fallback_math_path: str | None
 
 
 def count_tokens(text: str) -> int:
@@ -16,15 +58,16 @@ def count_tokens(text: str) -> int:
     Подсчитывает точное количество токенов в тексте.
 
     Args:
-        text: Исходный текст.
+        text (str): Исходный текст.
 
     Returns:
-        Количество токенов согласно словарю модели.
+        int: Количество токенов согласно словарю модели.
     """
-    return len(tokenizer.encode(text))
+    tokenizer = get_tokenizer()
+    return len(tokenizer.encode(text, add_special_tokens=False))
 
 
-def split_recursively(text: str, max_tokens: int) -> list[str]:
+def split_recursively(text: str, max_tokens: int) -> tuple[list[str], bool]:
     """
     Классический рекурсивный сплиттер для огромных кусков текста,
     которые не влезают в окно контекста модели.
@@ -34,10 +77,11 @@ def split_recursively(text: str, max_tokens: int) -> list[str]:
         max_tokens (int): Максимально допустимое число токенов.
 
     Returns:
-        list[str]: Список разрезанных кусков, каждый из которых <= max_tokens.
+        tuple[list[str], bool]: Список разрезанных кусков, каждый из которых <= max_tokens
+        и флаг (True, если пришлось резать по токенам).
     """
     if count_tokens(text) <= max_tokens:
-        return [text]
+        return [text], False
 
     separators = ["\n\n", "\n", ". ", " "]
     for sep in separators:
@@ -60,15 +104,19 @@ def split_recursively(text: str, max_tokens: int) -> list[str]:
 
             # Проверяем, удалось ли успешно разбить текст
             if all(count_tokens(p) <= max_tokens for p in result):
-                return result
+                return result, False
 
     # Если даже по пробелам не бьется, режем по токенам
+    logger.warning("fallback_token_split_used", text_length=len(text))
+
+    tokenizer = get_tokenizer()
     tokens = tokenizer.encode(text)
     chunks = [tokens[i : i + max_tokens] for i in range(0, len(tokens), max_tokens)]
-    return [str(tokenizer.decode(chunk)) for chunk in chunks]
+
+    return [str(tokenizer.decode(chunk)) for chunk in chunks], True
 
 
-def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
+def build_sandwiches(paragraphs: list[Paragraph]) -> list[SandwichBlock]:
     """
     Группирует параграфы методом 'Сэндвича', склеивая таблицы и формулы
     с соседними текстовыми блоками.
@@ -77,9 +125,9 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
         paragraphs (list[Paragraph]): Список параграфов секции.
 
     Returns:
-        list[dict]: Список сформированных блоков с предварительной разметкой.
+        list[SandwichBlock]: Список сформированных блоков с предварительной разметкой.
     """
-    blocks: list[dict[str, Any]] = []
+    blocks: list[SandwichBlock] = []
     skip_next = False
 
     for i, para in enumerate(paragraphs):
@@ -89,7 +137,9 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
 
         if para.type in ["table", "equation"]:
             sandwich_text = []
-            meta = {
+            meta: SandwichBlock = {
+                "text": "",
+                "is_sandwich": True,
                 "contains_table": para.type == "table",
                 "contains_math": para.type == "equation",
                 "raw_table_markup": para.content if para.type == "table" else None,
@@ -108,14 +158,16 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
             if i > 0 and paragraphs[i - 1].type == "text" and not blocks[-1].get("is_sandwich"):
                 sandwich_text.append(str(blocks.pop()["text"]))
 
-            sandwich_text.append(para.content)
+            text_to_embed = para.enriched_summary if para.enriched_summary else para.content
+            sandwich_text.append(text_to_embed)
 
             # Добавляем следующий абзац
             if i < len(paragraphs) - 1 and paragraphs[i + 1].type == "text":
                 sandwich_text.append(paragraphs[i + 1].content)
                 skip_next = True
 
-            blocks.append({"text": "\n\n".join(sandwich_text), "is_sandwich": True, **meta})
+            meta["text"] = "\n\n".join(sandwich_text)
+            blocks.append(meta)
         else:
             blocks.append(
                 {
@@ -135,20 +187,46 @@ def build_sandwiches(paragraphs: list[Paragraph]) -> list[dict[str, Any]]:
     return blocks
 
 
-def extract_validated_visuals(text: str, document_visuals: list[VisualMeta]) -> set[str]:
+def build_visuals_patterns(document_visuals: list[VisualMeta]) -> dict[str, re.Pattern[str]]:
     """
-    Ищет в тексте ссылки только на те иллюстрации, которые реально существуют
-    в метаданных текущего документа.
-    """
-    found_ids = set()
+    Один раз компилирует регулярные выражения для всех картинок документа.
 
+    Args:
+        document_visuals: Список визуальных элементов документа.
+
+    Returns:
+        dict: Словарь вида {'Fig. 1': скомпилированный_паттерн}
+    """
+    patterns = {}
     for visual in document_visuals:
-        # Экранируем спецсимволы
         escaped_id = re.escape(visual.id).replace(r"\ ", r"\s*")
+        patterns[visual.id] = re.compile(rf"\b{escaped_id}\b", re.IGNORECASE)
 
-        pattern = re.compile(rf"\b{escaped_id}\b", re.IGNORECASE)
+    return patterns
 
+
+def extract_visual_ids(
+    text: str, patterns: dict[str, re.Pattern[str]], image_map: dict[str, str]
+) -> dict[str, str]:
+    """
+    Ищет ссылки на иллюстрации по заранее скомпилированным паттернам
+    и возвращает словарь {ID: Путь}.
+
+    Args:
+        text: Текст текущего чанка/блока.
+        patterns: Словарь скомпилированных паттернов от build_visuals_patterns.
+        image_map: Словарь всех картинок документа {ID: Путь}.
+
+    Returns:
+        dict[str, str]: Словарь найденных картинок и их путей.
+    """
+    found_images: dict[str, str] = {}
+
+    if not text:
+        return found_images
+
+    for exact_id, pattern in patterns.items():
         if pattern.search(text):
-            found_ids.add(visual.id)
+            found_images[exact_id] = image_map.get(exact_id, "")
 
-    return found_ids
+    return found_images
