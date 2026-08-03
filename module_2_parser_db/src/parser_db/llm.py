@@ -1,6 +1,7 @@
 """Асинхронный клиент для работы с Gemini API."""
 
-from typing import cast
+import re
+from typing import Any, cast
 
 import httpx
 import structlog
@@ -12,8 +13,23 @@ from parser_db.profiler import profile_time
 logger = structlog.get_logger(__name__)
 
 
+def _on_retry_error(retry_state: Any) -> None:
+    """
+    Коллбэк tenacity при исчерпании всех попыток.
+
+    Args:
+        retry_state (Any): Текущее состояние попыток и исключений tenacity.
+
+    Returns:
+        None
+    """
+    logger.error("llm_retries_exhausted", error=str(retry_state.outcome.exception()))
+    return None
+
+
 class AsyncGeminiClient:
     def __init__(self) -> None:
+        """Инициализирует клиент для работы с Gemini API."""
         self.api_key = settings.GEMINI_API_KEY
         self.url = f"{settings.GEMINI_API_URL}?key={self.api_key}"
 
@@ -23,24 +39,32 @@ class AsyncGeminiClient:
             multiplier=1, min=settings.LLM_RETRY_MIN_WAIT, max=settings.LLM_RETRY_MAX_WAIT
         ),
         retry=retry_if_exception_type(httpx.HTTPError),
+        retry_error_callback=_on_retry_error,
     )
     @profile_time
     async def summarize_table(self, table_markup: str, caption: str = "") -> str | None:
-        """Отправляет сырую таблицу в LLM и возвращает плотное текстовое саммари."""
+        """Отправляет сырую таблицу в LLM и возвращает плотное текстовое саммари.
+
+        Args:
+            table_markup (str): Markdown-разметка таблицы для анализа.
+            caption (str, optional): Подпись к таблице. По умолчанию "".
+
+        Returns:
+            str | None: Текстовое саммари таблицы или None, если API-ключ не задан
+                или ответ имеет неожиданный формат.
+        """
         if not self.api_key:
             return None
 
-        prompt = (
-            "You are an expert AI in chemistry and material science. "
-            "Analyze the following table from a scientific paper and provide a concise, "
-            "dense text summary of its contents, trends, and key variables. "
-            "Do not use markdown tables in your response. Write only the summary.\n\n"
-        )
+        user_content = ""
         if caption:
-            prompt += f"Table Caption: {caption}\n"
-        prompt += f"Table Markdown:\n{table_markup}"
+            user_content += f"Table Caption: {caption}\n"
+        user_content += f"Table Markdown:\n{table_markup}"
 
-        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        payload = {
+            "systemInstruction": {"parts": [{"text": settings.LLM_PROMPT_TABLE_SUMMARY}]},
+            "contents": [{"parts": [{"text": user_content}]}],
+        }
 
         async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
             response = await client.post(self.url, json=payload)
@@ -48,10 +72,18 @@ class AsyncGeminiClient:
 
             data = response.json()
             try:
-                summary = data["candidates"][0]["content"]["parts"][0]["text"]
-                logger.debug("llm_summarize_success", table_length=len(table_markup))
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                summary = cast(str, raw_text).strip()
 
-                return cast(str, summary).strip()
+                # Удаляем markdown-обертки
+                summary = re.sub(r"^```[a-zA-Z]*\n|```$", "", summary).strip()
+
+                if "UNREADABLE_TABLE" in summary:
+                    logger.warning("llm_unreadable_table_detected", table_length=len(table_markup))
+                    return None
+
+                logger.debug("llm_summarize_success", table_length=len(table_markup))
+                return summary
             except (KeyError, IndexError):
                 logger.error("llm_unexpected_response_format", response_data=data)
                 return None
