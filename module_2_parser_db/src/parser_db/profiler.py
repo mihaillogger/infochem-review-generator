@@ -10,7 +10,39 @@ import structlog
 
 from parser_db.config import settings
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger("parser_db.profiler")
+
+
+def _extract_loggable_kwargs(
+    func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """
+    Извлекает и фильтрует аргументы функции для безопасного логирования.
+
+    Args:
+        func: Оборачиваемая функция.
+        args: Позиционные аргументы.
+        kwargs: Именованные аргументы.
+
+    Returns:
+        Словарь со скалярными параметрами и длинами коллекций.
+    """
+    try:
+        sig = inspect.signature(func)
+        bound_args = sig.bind(*args, **kwargs)
+        bound_args.apply_defaults()
+
+        log_data = {}
+        for key, value in bound_args.arguments.items():
+            # Защита от переполнения логов: пишем только метрики, влияющие на скорость
+            if isinstance(value, (int, float, bool, str)) and len(str(value)) < 100:
+                log_data[key] = value
+            elif isinstance(value, (list, tuple, dict, set)):
+                log_data[f"{key}_len"] = len(value)
+        return log_data
+    except Exception:
+        # Fallback предотвращает падение приложения при ошибках рефлексии
+        return {}
 
 
 def profile_time(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -37,7 +69,10 @@ def profile_time(func: Callable[..., Any]) -> Callable[..., Any]:
             result = await func(*args, **kwargs)
             duration = round(time.perf_counter() - start_time, 4)
 
-            logger.debug("profiling_result", function=func.__name__, duration_s=duration)
+            extra_logs = _extract_loggable_kwargs(func, args, kwargs)
+            logger.debug(
+                "profiling_result", function=func.__name__, duration_s=duration, **extra_logs
+            )
             return result
 
         return async_wrapper
@@ -48,7 +83,8 @@ def profile_time(func: Callable[..., Any]) -> Callable[..., Any]:
         result = func(*args, **kwargs)
         duration = round(time.perf_counter() - start_time, 4)
 
-        logger.debug("profiling_result", function=func.__name__, duration_s=duration)
+        extra_logs = _extract_loggable_kwargs(func, args, kwargs)
+        logger.debug("profiling_result", function=func.__name__, duration_s=duration, **extra_logs)
         return result
 
     return sync_wrapper
