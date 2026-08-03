@@ -19,6 +19,9 @@ dependencies = [
     "transformers>=5.14.1",
     "uvicorn>=0.51.0",
     "einops>=0.8.2",
+    "pylatexenc>=2.11",
+    "thefuzz>=0.22.1",
+    "levenshtein>=0.27.3",
 ]
 
 [dependency-groups]
