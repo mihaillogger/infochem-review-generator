@@ -3,7 +3,7 @@ set -e
 
 echo "Начинаем полный цикл проверок (Ruff, Mypy, Pytest)..."
 
-MODULES=("module_1_downloader" "module_2_parser_db" "module_3_agents")
+MODULES=("module_1_downloader" "module_2_parser" "module_3_rag_core" "module_3_agents")
 
 for MODULE in "${MODULES[@]}"; do
     echo "======================================"

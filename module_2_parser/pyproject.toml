@@ -1,0 +1,35 @@
+[project]
+name = "module-2-parser"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "markdownify>=1.2.3",
+    "pydantic>=2.13.4",
+    "pylatexenc>=2.11",
+    "thefuzz>=0.22.1",
+    "levenshtein>=0.27.3",
+    "pillow>=12.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.2.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.21",
+]
+
+[tool.mypy]
+mypy_path = "src"
+explicit_package_bases = true
+python_version = "3.11"
+strict = true
+exclude = [".venv"]
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src"
+]

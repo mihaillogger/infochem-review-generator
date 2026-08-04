@@ -1,9 +1,9 @@
 services:
   # FastAPI
   api_server:
-    image: module_2_parser_image:latest
+    image: module_3_rag_core_image:latest
     build:
-      context: ./module_2_parser_db
+      context: ./module_3_rag_core
       dockerfile: Dockerfile
       args:
         FASTEMBED_CACHE_DIR: ${FASTEMBED_CACHE_DIR:-/tmp/fastembed_cache}
@@ -15,17 +15,18 @@ services:
       - API_KEY=${API_KEY}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     env_file:
-      - ./module_2_parser_db/.env
+      - ./module_3_rag_core/.env
     volumes:
       - ${SHARED_DATA_ROOT}:/data
       - fastembed_cache:${FASTEMBED_CACHE_DIR}
       - hf_cache:${HF_CACHE_DIR}
-      - ${MODULE_2_LOGS_ROOT}:/app/logs
+      - ${MODULE_3_LOGS_ROOT}:/app/logs
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${API_PORT:-8000}/docs')" ]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 3m
     depends_on:
       qdrant:
         condition: service_started
@@ -34,8 +35,8 @@ services:
 
   # Воркер
   worker:
-    image: module_2_parser_image:latest
-    command: ["taskiq", "worker", "parser_db.broker:broker", "parser_db.worker",
+    image: module_3_rag_core_image:latest
+    command: ["taskiq", "worker", "rag_core.broker:broker", "rag_core.worker",
               "--workers", "${TASKIQ_WORKERS:-1}",
               "--max-async-tasks", "${TASKIQ_MAX_ASYNC_TASKS:-1}"]
     environment:
@@ -44,15 +45,15 @@ services:
       - API_KEY=${API_KEY}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     env_file:
-      - ./module_2_parser_db/.env
+      - ./module_3_rag_core/.env
     volumes:
       - ${SHARED_DATA_ROOT}:/data
       - fastembed_cache:${FASTEMBED_CACHE_DIR}
       - hf_cache:${HF_CACHE_DIR}
-      - ${MODULE_2_LOGS_ROOT}:/app/logs
+      - ${MODULE_3_LOGS_ROOT}:/app/logs
     depends_on:
       api_server:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
