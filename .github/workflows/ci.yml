@@ -28,7 +28,7 @@ jobs:
       - name: Sync dependencies for all modules
         run: |
           set -e
-          for module in module_0_shared module_1_downloader module_2_parser module_3_rag_core module_3_agents; do
+          for module in module_1_downloader module_2_parser module_3_rag_core module_3_agents; do
             echo "Syncing $module..."
             (cd $module && uv sync)
           done
