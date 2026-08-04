@@ -2,11 +2,11 @@
 
 import inspect
 import time
-import psutil
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
+import psutil
 import structlog
 
 from rag_core.config import settings
@@ -43,7 +43,7 @@ def _extract_loggable_kwargs(
                 log_data[f"{key}_len"] = len(value)
                 # Считаем символы для массивов строк (например, батчи текстов)
                 try:
-                    if value and isinstance(value[0], str):
+                    if isinstance(value, (list, tuple)) and value and isinstance(value[0], str):
                         log_data[f"{key}_chars"] = sum(len(s) for s in value if isinstance(s, str))
                 except Exception:
                     pass
@@ -105,7 +105,7 @@ def profile_time(func: Callable[..., Any]) -> Callable[..., Any]:
                     cpu_percent=cpu_percent,
                     ram_mb=round(ram_mb_after, 2),
                     ram_diff_mb=round(ram_mb_after - ram_mb_before, 2),
-                    **extra_logs
+                    **extra_logs,
                 )
 
         return async_wrapper
@@ -142,7 +142,7 @@ def profile_time(func: Callable[..., Any]) -> Callable[..., Any]:
                 cpu_percent=cpu_percent,
                 ram_mb=round(ram_mb_after, 2),
                 ram_diff_mb=round(ram_mb_after - ram_mb_before, 2),
-                **extra_logs
+                **extra_logs,
             )
 
     return sync_wrapper
