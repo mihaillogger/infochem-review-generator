@@ -4,20 +4,24 @@ import config
 
 
 class SearchQuery(BaseModel):
-    query: str = Field(description="Короткий и точный поисковый запрос (5-10 слов) для векторной базы.")
+    query: str = Field(
+        description="Короткий и точный поисковый запрос (5-7 слов) для векторной базы."
+    )
 
 
-def generate_search_query(task: str, previous_queries: list[str] = None, rejection_reason: str = None) -> str:
+def generate_search_query(
+    task: str, previous_queries: list[str] = None, rejection_reason: str = None
+) -> str:
     llm = ChatGoogleGenerativeAI(model=config.LLM_MODEL)
     structured_llm = llm.with_structured_output(SearchQuery)
 
     previous_queries = previous_queries or []
 
-    prompt = f"Ты — исследователь-адаптер (Adapter). Твоя задача — составить точный запрос для БД с сематическим поиском(то есть запросы должны быть не узкими, но по теме).\nГЛОБАЛЬНАЯ ЗАДАЧА:\n{task}\n"
+    prompt = f"Ты — исследователь-адаптер (Adapter). Твоя задача — составить точный запрос для БД с сематическим поиском(то есть запросы должны быть не слишком узкими, но по теме).\nГЛОБАЛЬНАЯ ЗАДАЧА:\n{task}\n"
 
     if rejection_reason and previous_queries:
         prompt += f"""
-            ПРЕДЫДУЩИЕ ПОПЫТКИ: {', '.join(previous_queries)}
+            ПРЕДЫДУЩИЕ ПОПЫТКИ: {", ".join(previous_queries)}
 
             ОТВЕТ ВАЛИДАТОРА (Критика): "{rejection_reason}"
 
