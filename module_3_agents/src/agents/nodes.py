@@ -118,66 +118,98 @@ def planner_node(state: GraphState) -> Dict[str, Any]:
     structured_llm = llm.with_structured_output(PlanOutput)
 
     system_prompt = f"""
-    Ты — ведущий научный редактор журнала Chemical Reviews. 
-    Твоя задача: спроектировать структуру монументального научного обзора (Review Article) на тему "{topic}" так, чтобы каждая секция была длинной до 2000 слов +- и минимум 7 секций.
+        Ты — ведущий научный редактор журнала Chemical Reviews. 
+        Твоя задача: спроектировать структуру научного обзора (Review Article) на английском языке на тему "{topic}".
 
-    ДЕРЕВО КОНТЕНТА (Доступные источники, их абстракты и секции):
-    {tree}
+        ДЕРЕВО КОНТЕНТА (Доступные источники, их абстракты и секции):
+        {tree}
 
-    ОБЯЗАТЕЛЬНАЯ МИНИМАЛЬНАЯ АРХИТЕКТУРА CHEMICAL REVIEWS:
-    1. Abstract.
-    2. Introduction.
-    3. Основные тематические разделы (Глубоко структурированные, нумерация 2, 3, 4 с подразделами 2.1, 2.2, 2.2.1 и т.д.). ЗАПРЕЩЕНО использовать стандартные заголовки вроде "Methods" или "Results". Названия должны отражать суть химических процессов/материалов в контексте темы "{topic}".
-    4. Summary and Outlook.
-    5. Data Availability Statement (если применимо).
+        ОБЯЗАТЕЛЬНАЯ МИНИМАЛЬНАЯ АРХИТЕКТУРА CHEMICAL REVIEWS:
+        1. Abstract.
+        2. Introduction.
+        3. Основные тематические разделы (Глубоко структурированные, с нумерацией 3, 4, 5... и подразделами 3.1, 3.2, 4.1 и т.д.). ЗАПРЕЩЕНО использовать стандартные заголовки вроде "Methods" или "Results". Названия должны отражать суть химических процессов/материалов в контексте темы "{topic}".
+        4. Summary and Outlook.
+        5. Data Availability Statement (если применимо).
 
-    ПРАВИЛА ПРОЕКТИРОВАНИЯ (АГЕНТСКИЕ ОГРАНИЧЕНИЯ):
-    - ZERO HALLUCINATION: Запрещено выдумывать узлы, для которых нет данных в Дереве Контента.
-    - MAXIMAL COVERAGE: Опирайся на АБСТРАКТЫ и интегрируй максимальное количество путей из Дерева Контента.
-    - SCALE & DEPTH (КРИТИЧЕСКОЕ ПРАВИЛО): Чтобы обзор получился монументальным, ты ОБЯЗАН сгенерировать МИНИМУМ 15 секций, используя жесткую вложенность.
-      Структура ДОЛЖНА БЫТЬ такого плана:
-      2. Синтез
-      2.1. Темплатные методы
-      2.2. Безтемплатные методы
-      3. Модификации
-      3.1. Допирование неметаллами
-      3.1.1. Допирование фосфором
-      Не делай плоский список из 12 корневых глав! Детализируй каждую главу на 2-4 подглавы. Каждая подглава — это отдельный объект в JSON.
-      
-    - GRANULARITY: Каждый сгенерированный тобой узел должен быть узкоспециализированным, с лимитом генерации 800-1000 слов. Прописывай это в поле instructions.
-    - MAPPING: Каждая секция плана ДОЛЖНА содержать список `target_paths` — точных путей из Дерева Контента.
+        ПРАВИЛА ПРОЕКТИРОВАНИЯ (АГЕНТСКИЕ ОГРАНИЧЕНИЯ):
+        - ZERO HALLUCINATION: Запрещено выдумывать тематические узлы, для которых нет данных. Опирайся ТОЛЬКО на предоставленное Дерево Контента. ИСКЛЮЧЕНИЕ: Для Abstract, Introduction, Summary и Data Availability поле `target_paths` оставляй пустым.
+        - MAXIMAL COVERAGE: Интегрируй все релевантные(подходящие для данной темы) пути из Дерева Контента без остатка.
+        - DYNAMIC SCALING (КРИТИЧЕСКОЕ ПРАВИЛО МАсштабирования): Оцени объем переданного Дерева Контента. 
+          * Если материалов много: спроектируй монументальный обзор (5-8 тематических глав, разбитых на 2-4 подглавы каждая).
+          * Если материалов мало: спроектируй компактный, но глубокий обзор (3-4 тематические главы, можно без жесткого дробления на подглавы).
+        - ИЕРАРХИЯ JSON: Используй двухуровневую структуру: ГЛАВЫ (chapters) и вложенные ПОДГЛАВЫ (subsections).
+        - ГИБКОСТЬ ГЛАВ: 
+          Вводные и заключительные главы (Abstract, Introduction, Summary) делай МОНОЛИТНЫМИ (массив subsections пустой, заполняй instructions).
+          Тематические главы дроби на подглавы ТОЛЬКО если для этого есть достаточно материала в Дереве Контента. Если тема узкая — делай монолитную тематическую главу.
+        - GRANULARITY: Каждый генерируемый текстовый узел (монолитная глава или подглава) должен иметь лимит генерации 800-1000 слов. Прописывай это в instructions.
+        - MAPPING: Каждая тематическая секция/подглава ДОЛЖНА содержать список `target_paths` из Дерева Контента.
 
-    АЛГОРИТМ РАБОТЫ (CHAIN OF THOUGHT):
-    1. Изучи корневые узлы дерева и их абстракты, чтобы понять общую картину и ключевые идеи.
-    2. Оцени внутренние секции статей.
-    3. Сформируй междисциплинарные кластеры, объединяющие секции из разных источников.
-    4. Проверь "Слепые зоны": убедись, что ни один крупный раздел Дерева не был забыт.
-    5. Выстрой логическую последовательность разделов от базовых концепций к сложным применениям.
-    6. Сгенерируй финальный JSON, строго следуя Pydantic-схеме.
-    """
-    result = structured_llm.invoke(system_prompt)
+        АЛГОРИТМ РАБОТЫ (CHAIN OF THOUGHT):
+        1. Обязательно создай монолитные главы Abstract и Introduction.
+        2. Изучи объем и разнообразие узлов дерева. Выбери масштаб обзора (монументальный или компактный).
+        3. Сформируй тематические главы и, если материала достаточно, разбей их на подглавы.
+        4. Обязательно добавь монолитные Summary и Data Availability.
+        5. Сгенерируй финальный JSON, строго следуя Pydantic-схеме.
+        """
+    for attempt in range(3):
+        try:
+            result = structured_llm.invoke(system_prompt)
+            if result and result.chapters:
+                break
+        except Exception as e:
+            print(f"[PLANNER] Ошибка генерации плана: {e}. Повтор...")
+            time.sleep(5)
+    else:
+        return {"current_section": None, "pending_sections": []}
 
     pending = []
-    for i, sec in enumerate(result.sections):
-        pending.append(
-            SectionState(
-                section_id=str(i + 1),
-                title=sec.title,
-                instructions=sec.instructions,
-                target_paths=sec.target_paths,
-                search_queries=[],
-                raw_chunks=[],
-                memory_bank=[],
-                retriever_rejection="",
-                retriever_retries=0,
-                draft_content="",
-                draft_used_ids=[],
-                citation_errors="",
-                writer_retries=0,
-                content="",
-                used_chunk_ids=[],
+    global_section_id = 1
+
+    for chapter in result.chapters:
+        if not chapter.subsections:
+            pending.append(
+                SectionState(
+                    section_id=str(global_section_id),
+                    title=f"{chapter.chapter_number}. {chapter.title}",
+                    instructions=chapter.instructions,
+                    target_paths=chapter.target_paths,
+                    search_queries=[],
+                    raw_chunks=[],
+                    memory_bank=[],
+                    retriever_rejection="",
+                    retriever_retries=0,
+                    draft_content="",
+                    draft_used_ids=[],
+                    citation_errors="",
+                    writer_retries=0,
+                    content="",
+                    used_chunk_ids=[],
+                )
             )
-        )
+            global_section_id += 1
+        else:
+            for sub in chapter.subsections:
+                combined_title = f"{chapter.chapter_number}. {chapter.title} — {sub.section_number}. {sub.title}"
+                pending.append(
+                    SectionState(
+                        section_id=str(global_section_id),
+                        title=combined_title,
+                        instructions=sub.instructions,
+                        target_paths=sub.target_paths,
+                        search_queries=[],
+                        raw_chunks=[],
+                        memory_bank=[],
+                        retriever_rejection="",
+                        retriever_retries=0,
+                        draft_content="",
+                        draft_used_ids=[],
+                        citation_errors="",
+                        writer_retries=0,
+                        content="",
+                        used_chunk_ids=[],
+                    )
+                )
+                global_section_id += 1
 
     current = pending.pop(0) if pending else None
     return {"current_section": current, "pending_sections": pending}
@@ -267,16 +299,36 @@ def writer_node(state: GraphState) -> Dict[str, Any]:
     return {"current_section": current}
 
 
+import re
+from typing import Dict, Any
+
+
 def eval_citation_node(state: GraphState) -> Dict[str, Any]:
-    """Детерминированная AST-проверка галлюцинаций цитат и запрещенных форматов."""
+    """Детерминированная AST-проверка галлюцинаций цитат, форматов и зацикливаний."""
     current = state["current_section"]
     draft_text = current["draft_content"]
+
+    if "Обрыв генерации по лимиту токенов" in draft_text:
+        current["citation_errors"] = (
+            "КРИТИЧЕСКАЯ ОШИБКА: Твой предыдущий ответ был обрезан из-за бесконечного зацикливания. "
+            "Сгенерируй текст строго по делу, не используй спам из макросов LaTeX и следи за структурой."
+        )
+        return {"current_section": current}
+
+    draft_text = draft_text.replace('\x08', '\\b').replace('\x09', '\\t')
+
+    if re.search(r'(.{15,})\1{10,}', draft_text):
+        current["citation_errors"] = (
+            "КРИТИЧЕСКАЯ ОШИБКА: Обнаружено жесткое зацикливание генерации (бесконечный повтор токенов). "
+            "Сгенерируй текст заново, измени структуру предложения и не используй проблемный макрос."
+        )
+        return {"current_section": current}
 
     illegal_tags = re.findall(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]", draft_text)
     if illegal_tags:
         current["citation_errors"] = (
             f"КРИТИЧЕСКАЯ ОШИБКА: Использован запрещенный формат цитирования {illegal_tags[0]}. "
-            f"ТЫ ОБЯЗАН ИСПОЛЬЗОВАТЬ ТОЛЬКО ФОРМАТ [ID: УНИКАЛЬНЫЙ_ХЭШ]."
+            f"ТЫ ОБЯЗАН ИСПОЛЬЗОВАТЬ ТОЛЬКО ФОРМАТ [ID: УНИКАЛЬНЫЙ_НОМЕР]."
         )
         return {"current_section": current}
 
@@ -284,7 +336,11 @@ def eval_citation_node(state: GraphState) -> Dict[str, Any]:
 
     found_ids = []
     for tag in raw_tags:
-        uuids = re.findall(r"([a-f0-9\-]{8,36})", tag)
+        uuids = [
+            u.strip()
+            for u in re.findall(r"([a-zA-Z0-9\-]+)", tag)
+            if u.strip().upper() != 'ID'
+        ]
         found_ids.extend(uuids)
 
     found_ids = list(set(found_ids))
@@ -332,10 +388,23 @@ def advance_section_node(state: GraphState) -> Dict[str, Any]:
 
 def compiler_node(state: GraphState) -> Dict[str, Any]:
     text_blocks = []
+    last_chapter = None
+
     for sec in state["completed_sections"]:
-        title = sec.get("title", "Untitled Section")
+        raw_title = sec.get("title", "Untitled Section")
         content = sec.get("content", "")
-        text_blocks.append(f"## {title}\n\n{content}")
+
+        if " — " in raw_title:
+            chapter_title, sub_title = raw_title.split(" — ", 1)
+
+            if chapter_title != last_chapter:
+                text_blocks.append(f"## {chapter_title}")
+                last_chapter = chapter_title
+
+            text_blocks.append(f"### {sub_title}\n\n{content}")
+        else:
+            text_blocks.append(f"## {raw_title}\n\n{content}")
+            last_chapter = raw_title
 
     full_text = "\n\n".join(text_blocks)
 
@@ -344,42 +413,56 @@ def compiler_node(state: GraphState) -> Dict[str, Any]:
         for chunk in sec.get("memory_bank", []):
             meta_map[str(chunk["id"])] = chunk.get("metadata", {})
 
-    ref_map = {}
+    paper_ref_map = {}
+    paper_meta_map = {}
     ref_counter = 1
 
     def process_cluster(match):
         nonlocal ref_counter
         cluster_text = match.group(0)
 
-        ids = re.findall(r"([a-f0-9\-]{8,36})", cluster_text)
+        raw_ids = re.findall(r"([a-zA-Z0-9\-]+)", cluster_text)
+        ids = [i.strip() for i in raw_ids if i.strip().upper() != 'ID']
 
         if not ids:
             return cluster_text
 
         nums = []
         for cid in ids:
-            clean_cid = cid.strip()
-            if clean_cid in meta_map:
-                if clean_cid not in ref_map:
-                    ref_map[clean_cid] = ref_counter
+            if cid in meta_map:
+                meta = meta_map[cid]
+
+                # Идентифицируем уникальную статью по DOI. Если его нет — по названию.
+                doi = meta.get("doi")
+                if doi and str(doi).strip().lower() != "doi отсутствует":
+                    paper_key = str(doi).strip().lower()
+                else:
+                    paper_key = str(meta.get("title", f"unknown_{cid}")).strip().lower()
+
+                if paper_key not in paper_ref_map:
+                    paper_ref_map[paper_key] = ref_counter
+                    paper_meta_map[paper_key] = meta
                     ref_counter += 1
-                nums.append(ref_map[clean_cid])
+
+                nums.append(paper_ref_map[paper_key])
 
         if not nums:
             return ""
 
         return f"<sup>{_group_vancouver_numbers(nums)}</sup>"
 
+    full_text = full_text.replace('\\\\', '\\')
+
     final_doc = re.sub(
-        r"\[(?=[^\]]*[a-f0-9\-]{8,36})[^\]]+\]",
+        r"(?:\[ID:\s*[a-zA-Z0-9\-]+\]\s*)+",
         process_cluster,
         full_text,
         flags=re.IGNORECASE,
     )
 
     final_doc += "\n\n## References\n"
-    for cid, num in sorted(ref_map.items(), key=lambda i: i[1]):
-        meta = meta_map.get(cid, {})
+    for paper_key, num in sorted(paper_ref_map.items(), key=lambda i: i[1]):
+        meta = paper_meta_map[paper_key]
 
         authors = meta.get("authors", [])
         author_str = f"{authors[0]} et al." if len(authors) > 1 else (authors[0] if authors else "Unknown Author")
