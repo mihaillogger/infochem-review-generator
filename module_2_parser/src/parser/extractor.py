@@ -30,7 +30,11 @@ def optimize_table_markup(html_markup: str) -> str:
     """Адаптивно сжимает таблицу: простую в Markdown, сложную — в HTML."""
     is_complex = "colspan" in html_markup.lower() or "rowspan" in html_markup.lower()
     if not is_complex:
-        return md(html_markup, strip=["a", "img"], heading_style="ATX").strip()
+        # escape_underscores=False: markdownify по умолчанию экранирует "_" —
+        # это ломает LaTeX-формулы в ячейках химических таблиц (C_3N_4 -> C\_3N\_4).
+        return md(
+            html_markup, strip=["a", "img"], heading_style="ATX", escape_underscores=False
+        ).strip()
 
     soup = BeautifulSoup(html_markup, "html.parser")
     for tag in soup(["a", "img", "div", "span"]):
@@ -45,9 +49,44 @@ def optimize_table_markup(html_markup: str) -> str:
     return str(soup).replace("\n", "").strip()
 
 
+#  Административные/служебные заголовки без содержательного текста для review —
+# секции с такими заголовками целиком выбрасываются в build_parsed_document
+# (не мусор в смысле is_boilerplate_text — это цельные разделы вроде
+# "Acknowledgements"/"CRediT authorship..."/"Funding", а не отдельные абзацы).
+NON_CONTENT_SECTION_RE = re.compile(
+    r"^(acknowledge?ments?|references?|credit authorship contribution statement|"
+    r"credit author statement|author contributions?|authors?'?\s*contributions?|"
+    r"authors?|funding|data availability( statement)?|"
+    r"declaration of competing interest|conflicts? of interest|"
+    r"compliance with ethical standards|declarations?|additional information|"
+    r"publisher'?s note|correspondence|orcid|abbreviations?|contents?|"
+    r"article\s?info(rmation)?|accepted (manuscript|article)|journal pre-?proofs?|"
+    r"just accepted|check for updates|article|open access|paper|review|"
+    r"appendix [a-z]\.?\s*(supplementary|supporting)( data| information)?|"
+    r"si supporting information|supporting information)[:.]?$",
+    re.IGNORECASE,
+)
+
+
+def is_non_content_section(heading: str) -> bool:
+    """Проверяет, что заголовок раздела — административная плашка
+    (Acknowledgements/References/CRediT/Funding/...), а не содержательный
+    текст статьи. Такие разделы в build_parsed_document не идут в вывод —
+    для review-контента и векторной БД это чистый шум."""
+    clean_heading = re.sub(r"^[\d.\sIVX]+", "", heading).strip()
+    return bool(NON_CONTENT_SECTION_RE.match(clean_heading))
+
+
 def normalize_section_name(heading: str) -> SectionType:
     """Приводит заголовок к строгому Enum через fuzzy matching."""
     clean_heading = re.sub(r"^[\d\.\sIVX]+", "", heading).strip().lower()
+
+    # Некоторые PDF рендерят заголовки вразрядку ("A B S T R A C T") —
+    # OCR/MinerU сохраняет пробелы между буквами, fuzzy-мэтчинг на таком
+    # проигрывает по длине. Если весь заголовок — однобуквенные "слова",
+    # схлопываем пробелы перед сравнением.
+    if clean_heading and all(len(w) == 1 for w in clean_heading.split()):
+        clean_heading = clean_heading.replace(" ", "")
 
     mapping = {
         SectionType.ABSTRACT: ["abstract", "background"],
@@ -59,6 +98,18 @@ def normalize_section_name(heading: str) -> SectionType:
             "theory",
             "interaction",
             "behavior",
+            "result",
+            "discussion",
+            # "Charge separation"/"charge transfer" — устойчивая фраза про
+            # механизм фотокатализа, а не про синтез; заодно точное
+            # совпадение "separation" (100) перебивает случайную коллизию
+            # "preparation" vs "separation" (86 по fuzz.ratio), из-за
+            # которой "Charge separation" раньше уезжало в Materials & Synthesis.
+            # ("migration"/"recombination" сюда сознательно не добавлены —
+            # они сами коллидируют с "integration"/"combination", которые
+            # реально встречаются в заголовках про синтез композитов.)
+            "separation",
+            "transfer",
         ],
         SectionType.MATERIALS_AND_SYNTHESIS: [
             "material",
@@ -69,6 +120,14 @@ def normalize_section_name(heading: str) -> SectionType:
             "composite",
             "route",
             "experimental",
+            "characterization",
+            "characterisation",
+            "method",
+            "measurement",
+            "chemical",
+            "instrumentation",
+            "computational",
+            "reaction",
         ],
         SectionType.APPLICATIONS: [
             "application",
@@ -88,15 +147,29 @@ def normalize_section_name(heading: str) -> SectionType:
         ],
     }
 
+    # Сравниваем по отдельным словам через fuzz.ratio (не partial_ratio!) —
+    # partial_ratio ищет наиболее похожее ОКНО внутри всей строки и не
+    # штрафует за разницу в длине, из-за чего короткое ключевое слово может
+    # словить случайную (и по смыслу неверную) подстроку внутри совсем
+    # другого слова: "concept" vs "concentration" = 86, "method" vs
+    # "methanol" = 80 — оба выше порога 80, оба реально ловились на корпусе
+    # ("Effect of catalyst concentration" уезжало в Concepts & Mechanisms).
+    # fuzz.ratio сравнивает слова целиком и штрафует за разницу в длине:
+    # те же пары дают 60 и 71 — уже ниже порога, а настоящие варианты формы
+    # слова (concept/concepts, synthesis/synthesized, material/materials)
+    # остаются на 80+.
+    words = re.findall(r"[a-zà-ÿ]+", clean_heading)
+
     best_match = SectionType.UNKNOWN
     highest_score = 0.0
 
     for sec_type, keywords in mapping.items():
         for kw in keywords:
-            score = fuzz.partial_ratio(kw, clean_heading)
-            if score > highest_score:
-                highest_score = score
-                best_match = sec_type
+            for word in words:
+                score = fuzz.ratio(kw, word)
+                if score > highest_score:
+                    highest_score = score
+                    best_match = sec_type
 
     if highest_score >= 80:
         return best_match
@@ -125,6 +198,21 @@ def is_smiles(text: str) -> bool:
     return True
 
 
+def _is_garbage_word(word: str) -> bool:
+    """Длинный токен в таблице — мусор, если это не SMILES, не URL и не LaTeX-формула.
+
+    Составные названия материалов в химических таблицах (например,
+    '$Ni_{1.5}Co_{1.5}S_{4}@g-C_{3}N_{4}$') легко превышают 35 символов и не
+    проходят строгий SMILES-паттерн — исключаем их отдельно, иначе нормальная
+    таблица ошибочно улетает в VLM-фоллбэк.
+    """
+    if "http" in word:
+        return False
+    if word.startswith("$") and word.endswith("$"):
+        return False
+    return not is_smiles(word)
+
+
 def is_table_broken(html_markup: str) -> bool:
     """Определяет, сломана ли структура HTML-таблицы с помощью DOM-дерева."""
     if not html_markup or len(html_markup) < 30:
@@ -134,7 +222,7 @@ def is_table_broken(html_markup: str) -> bool:
     clean_text = soup.get_text(separator=" ")
 
     for w in clean_text.split():
-        if len(w) > 35 and "http" not in w and not is_smiles(w):
+        if len(w) > 35 and _is_garbage_word(w):
             return True
 
     cells = soup.find_all(["td", "th"])
@@ -145,6 +233,33 @@ def is_table_broken(html_markup: str) -> bool:
         return True
 
     return len(soup.find_all("tr")) == 0
+
+
+_BOILERPLATE_TEXT_RE = re.compile(
+    r"^(©|Copyright:?\s*©|COPYRIGHT$|WILEY-VCH$"
+    r"|\(?https?://creativecommons\.org"
+    r"|www\.\w[\w.-]*\.\w+/(locate|journal)"
+    r"|A division of the American Chemical Society$"
+    r"|Open Access[:.]? This article is licensed"
+    r"|This article is protected by copyright"
+    r"|This article was downloaded by:"
+    r"|Received:?\s+\d{1,2}\s+\w+\s+\d{4}.{0,80}(Accepted|Published))"
+    r"|[Ss]upporting [Ii]nformation.{0,40}is available (online|from)"
+    r"|Publisher'?s Note Springer Nature"
+    r"|Springer Nature remains neutral with regard to jurisdictional claims"
+    r"|Springer Nature or its licensor"
+    r"|[Tt]his (article|work) is (an )?open access.{0,60}distributed under"
+    r"|under the terms of the Creative Commons"
+    r"|Creative Commons Attribution",
+    re.IGNORECASE,
+)
+
+
+def is_boilerplate_text(text: str) -> bool:
+    """Ловит юридический/копирайтный текст, который MinerU иногда типизирует
+    как обычный 'text', а не 'header'/'footer' — фильтрация по типу блока
+    (см. run_parser.GARBAGE_TYPES) его не ловит."""
+    return bool(_BOILERPLATE_TEXT_RE.search(text))
 
 
 def clean_text_lite(text: str) -> str:
@@ -315,7 +430,9 @@ def stitch_visuals(
 
 
 def build_parsed_document(
-    mineru_data: list[dict[str, Any]], metadata: dict[str, Any], output_images_dir: str = "."
+    mineru_data: list[dict[str, Any]],
+    metadata: dict[str, Any],
+    output_images_dir: str = ".",
 ) -> ParsedDocument:
     """Собирает объект ParsedDocument с буферизацией и склейкой визуальных блоков."""
     sections: list[Section] = []
@@ -331,6 +448,7 @@ def build_parsed_document(
     vis_buffer_pages: list[int] = []
     current_main_caption = ""
     current_visual_id = ""
+    current_vlm_description = ""
 
     def flush_visual_buffer() -> None:
         nonlocal \
@@ -338,30 +456,45 @@ def build_parsed_document(
             vis_buffer_bboxes, \
             vis_buffer_pages, \
             current_main_caption, \
-            current_visual_id
-        if not vis_buffer_paths:
-            return
+            current_visual_id, \
+            current_vlm_description
+        if vis_buffer_paths:
+            exact_id = current_visual_id or f"Vis_{len(visuals)}"
+            safe_id = re.sub(r"[^a-zA-Z0-9_]", "_", exact_id)
+            out_path = os.path.join(output_images_dir, f"stitched_{safe_id}.png")
 
-        exact_id = current_visual_id or f"Vis_{len(visuals)}"
-        safe_id = re.sub(r"[^a-zA-Z0-9_]", "_", exact_id)
-        out_path = os.path.join(output_images_dir, f"stitched_{safe_id}.png")
+            final_path = stitch_visuals(
+                vis_buffer_paths, vis_buffer_bboxes, vis_buffer_pages, out_path
+            )
+            if not final_path:
+                final_path = os.path.abspath(vis_buffer_paths[0])
 
-        final_path = stitch_visuals(vis_buffer_paths, vis_buffer_bboxes, vis_buffer_pages, out_path)
-        if not final_path:
-            final_path = os.path.abspath(vis_buffer_paths[0])
+            visuals.append(
+                VisualMeta(
+                    id=exact_id,
+                    path=to_docker_path(final_path),
+                    caption=current_main_caption or None,
+                    vlm_description=current_vlm_description or None,
+                )
+            )
+            current_paragraphs.append(
+                Paragraph(type="image", content=f"[{exact_id}: {current_main_caption}]")
+            )
 
-        visuals.append(
-            VisualMeta(id=exact_id, path=to_docker_path(final_path), caption=current_main_caption)
-        )
-        current_paragraphs.append(
-            Paragraph(type="image", content=f"[{exact_id}: {current_main_caption}]")
-        )
+            vis_buffer_paths.clear()
+            vis_buffer_bboxes.clear()
+            vis_buffer_pages.clear()
 
-        vis_buffer_paths.clear()
-        vis_buffer_bboxes.clear()
-        vis_buffer_pages.clear()
+        # Сбрасываем контекст подписи/ID всегда, а не только когда реально
+        # была склеена картинка: иначе подпись, стоящая в тексте без своей
+        # картинки рядом (например отдельный список "Figure captions" перед
+        # блоком картинок в конце документа), "прилипает" как призрак ко всем
+        # следующим безподписным картинкам вплоть до конца статьи — реальный
+        # баг, склеивавший десятки не связанных друг с другом рисунков в один
+        # гигантский файл под чужим ID.
         current_main_caption = ""
         current_visual_id = ""
+        current_vlm_description = ""
 
     for block in mineru_data:
         block_type = block.get("type", "")
@@ -390,7 +523,7 @@ def build_parsed_document(
             if content == current_heading_str:
                 continue
 
-            if current_paragraphs:
+            if current_paragraphs and not is_non_content_section(current_heading_str):
                 sections.append(
                     Section(
                         original_heading=current_heading_str,
@@ -435,6 +568,8 @@ def build_parsed_document(
             else:
                 caption_text = ""
 
+            vlm_description = block.get("content", "").strip()
+
             new_id = extract_exact_visual_id(caption_text, "") if caption_text else ""
 
             if new_id and current_visual_id and new_id != current_visual_id:
@@ -443,10 +578,38 @@ def build_parsed_document(
             if caption_text and not current_main_caption:
                 current_main_caption = caption_text
 
+            if vlm_description and not current_vlm_description:
+                current_vlm_description = vlm_description
+
             if new_id:
                 current_visual_id = new_id
             elif caption_text and not current_visual_id:
                 current_visual_id = f"Vis_{len(visuals)}"
+
+            # Предохранитель: если у фигур/чартов подряд нет подписей (типично
+            # для препринтов, где все Figure captions собраны отдельным списком
+            # в конце документа, а сами картинки идут потом одна за одной без
+            # единого текстового блока между ними — естественного повода
+            # сбросить буфер просто не возникает), буфер иначе может расти
+            # неограниченно и склеить вообще все рисунки статьи в одну
+            # гигантскую картинку.
+            #
+            # Порог зависит от того, есть ли у буфера реальная подпись:
+            # если current_main_caption пуст — у нас вообще нет сигнала, что
+            # эти картинки относятся к одной фигуре, так что режем на любой
+            # смене страницы (макс. 1 страница на буфер). Если подпись есть
+            # (реально распознанный "Fig./Table/Scheme ...") — доверяем ей
+            # больше: легитимные multi-page фигуры обычно не растягиваются
+            # больше чем на пару-тройку соседних страниц.
+            max_pages = 3 if current_main_caption else 1
+            if (
+                img_path
+                and bbox
+                and vis_buffer_pages
+                and page_idx not in vis_buffer_pages
+                and len(set(vis_buffer_pages)) >= max_pages
+            ):
+                flush_visual_buffer()
 
             if img_path and bbox:
                 vis_buffer_paths.append(img_path)
@@ -480,12 +643,12 @@ def build_parsed_document(
                 current_paragraphs.append(Paragraph(type="table", content=table_content))
             continue
 
-        if block_type == "text" and content:
+        if block_type == "text" and content and not is_boilerplate_text(content):
             current_paragraphs.append(Paragraph(type="text", content=content))
 
     flush_visual_buffer()
 
-    if current_paragraphs:
+    if current_paragraphs and not is_non_content_section(current_heading_str):
         sections.append(
             Section(
                 original_heading=current_heading_str,
