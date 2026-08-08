@@ -11,6 +11,13 @@ class VisualMeta(BaseModel):
     id: str = Field(..., description="Идентификатор в тексте, например 'Fig. 1'")
     path: str = Field(..., description="Абсолютный путь к файлу в /data/images/")
     caption: str | None = Field(default=None, description="Распознанная подпись")
+    vlm_description: str | None = Field(
+        default=None,
+        description=(
+            "Описание содержимого от MinerU VLM: для картинок/схем — смысловое "
+            "описание, для графиков (chart) — оцифрованная таблица данных."
+        ),
+    )
 
 
 class Paragraph(BaseModel):
